@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.25.x", "stable"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go mod tidy
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        # Real model integration tests skip themselves unless REIN_INTEGRATION=1.
+        run: go test -race ./...
+      - name: build for Windows
+        run: GOOS=windows go build ./...
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: stable
