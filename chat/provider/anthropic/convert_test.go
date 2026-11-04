@@ -42,7 +42,7 @@ func TestBuildParamsAddsSystemPromptAndTools(t *testing.T) {
 }
 
 func TestBuildParamsTemperatureZeroIsSent(t *testing.T) {
-	client := New(Config{})
+	client := New(Config{Model: ModelClaudeSonnet5_5})
 	params, err := client.buildParams(chat.Request{
 		Options:  chat.Options{Temperature: chat.Float(0)},
 		Messages: []chat.Message{chat.NewUserTextMessage("你好")},
@@ -224,7 +224,7 @@ func TestConvertToolResultWithImages(t *testing.T) {
 }
 
 func TestConvertMediaKinds(t *testing.T) {
-	client := New(Config{})
+	client := New(Config{Model: ModelClaudeSonnet5_5})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.MediaURL("https://example.com/a.webp"),
@@ -271,17 +271,17 @@ func TestConvertMediaKinds(t *testing.T) {
 }
 
 func TestInfoReportsImageSupport(t *testing.T) {
-	info := New(Config{}).Info()
+	info := New(Config{Model: ModelClaudeSonnet5_5}).Info()
 	if !info.SupportsMedia || info.ImageLimits.MaxBytes == 0 {
 		t.Fatalf("should support media by default and give image specs: %+v", info)
 	}
-	if New(Config{TextOnly: true}).Info().SupportsMedia {
+	if New(Config{Model: ModelClaudeSonnet5_5, TextOnly: true}).Info().SupportsMedia {
 		t.Fatal("TextOnly should turn media support off")
 	}
 }
 
 func TestBuildParamsReplacesImagesForTextOnlyEndpoint(t *testing.T) {
-	client := New(Config{TextOnly: true})
+	client := New(Config{Model: ModelClaudeSonnet5_5, TextOnly: true})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{{
 		Role:    chat.RoleUser,
 		Content: []chat.ContentBlock{chat.Text("看图"), imageBlock("image/png")},
@@ -319,12 +319,12 @@ func TestBuildParamsReasoning(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{"no thinking parameters by default", Config{}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
-		{"adaptive models use effort", Config{}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},
+		{"no thinking parameters by default", Config{Model: ModelClaudeSonnet5_5}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
+		{"adaptive models use effort", Config{Model: ModelClaudeSonnet5_5}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},
 			[]string{`"thinking":{"display":"summarized","type":"adaptive"}`, `"effort":"xhigh"`}, []string{`"temperature"`}},
 		{"fall back to high without xhigh", Config{Model: ModelClaudeSonnet4_6}, chat.Options{Reasoning: chat.ReasoningXHigh},
 			[]string{`"type":"adaptive"`, `"effort":"high"`}, nil},
-		{"models that cannot turn thinking off use the lowest effort", Config{}, chat.Options{Reasoning: chat.ReasoningOff},
+		{"models that cannot turn thinking off use the lowest effort", Config{Model: ModelClaudeSonnet5_5}, chat.Options{Reasoning: chat.ReasoningOff},
 			[]string{`"effort":"low"`}, []string{`"thinking"`}},
 		{"models that can turn it off send disabled", Config{Model: ModelClaudeHaiku5_5}, chat.Options{Reasoning: chat.ReasoningOff, Temperature: chat.Float(0.2)},
 			[]string{`"thinking":{"type":"disabled"}`, `"temperature":0.2`}, []string{`"output_config"`}},
@@ -350,13 +350,13 @@ func TestBuildParamsReasoning(t *testing.T) {
 			}
 		})
 	}
-	if _, err := New(Config{}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
+	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
 		t.Fatal("an unknown reasoning level should fail")
 	}
 }
 
 func TestBuildParamsCacheBreakpoints(t *testing.T) {
-	client := New(Config{})
+	client := New(Config{Model: ModelClaudeSonnet5_5})
 	req := chat.Request{
 		SystemPrompt: "系统提示",
 		Messages: []chat.Message{
@@ -409,10 +409,10 @@ func TestInfoUsesModelSpec(t *testing.T) {
 		cfg        Config
 		input, out int
 	}{
-		{Config{}, 1_000_000, 128_000},
+		{Config{Model: ModelClaudeSonnet5_5}, 1_000_000, 128_000},
 		{Config{Model: ModelClaudeHaiku4_5}, 200_000, 64_000},
 		{Config{Model: "other-model"}, 200_000, 8_192},
-		{Config{MaxInputTokens: 50_000, MaxOutputTokens: 2_000}, 50_000, 2_000},
+		{Config{Model: ModelClaudeSonnet5_5, MaxInputTokens: 50_000, MaxOutputTokens: 2_000}, 50_000, 2_000},
 	}
 	for _, tc := range cases {
 		info := New(tc.cfg).Info()
@@ -424,7 +424,7 @@ func TestInfoUsesModelSpec(t *testing.T) {
 
 func TestBuildParamsStructuredOutput(t *testing.T) {
 	output := chat.Options{Reasoning: chat.ReasoningLow, Output: &chat.OutputFormat{Schema: json.RawMessage(`{"type":"object"}`)}}
-	got := paramsJSON(t, New(Config{}), chat.Request{Options: output})
+	got := paramsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Options: output})
 	if !strings.Contains(got, `"output_config":{"effort":"low","format":{"schema":{"type":"object"},"type":"json_schema"}}`) {
 		t.Fatalf("should use native output_config.format alongside effort: %s", got)
 	}
@@ -432,7 +432,7 @@ func TestBuildParamsStructuredOutput(t *testing.T) {
 	if strings.Contains(got, "json_schema") || !strings.Contains(got, `JSON Schema:\n\n{\"type\":\"object\"}`) {
 		t.Fatalf("compatible endpoints should write the schema into the system prompt: %s", got)
 	}
-	if New(Config{Model: "deepseek-v4-flash"}).Info().StructuredOutput || !New(Config{}).Info().StructuredOutput {
+	if New(Config{Model: "deepseek-v4-flash"}).Info().StructuredOutput || !New(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
 		t.Fatal("model info should reflect native structured output support")
 	}
 }
@@ -449,16 +449,16 @@ func TestBuildParamsToolChoice(t *testing.T) {
 	if got := paramsJSON(t, New(Config{Model: ModelClaudeHaiku4_5}), req(required, chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"type":"any"}`) || strings.Contains(got, `"thinking"`) {
 		t.Fatalf("budget thinking models should not enable thinking with forced tool calls: %s", got)
 	}
-	if got := paramsJSON(t, New(Config{}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
+	if got := paramsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
 		t.Fatalf("should send none: %s", got)
 	}
 	r := req(required, "")
 	r.Messages = []chat.Message{chat.NewUserTextMessage("hi")}
-	if _, err := New(Config{}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
+	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
 		t.Fatalf("models that cannot turn thinking off should reject forced tool calls: %v", err)
 	}
 	r.Tools = nil
-	if _, err := New(Config{}).buildParams(r); err != nil {
+	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err != nil {
 		t.Fatalf("ToolChoice should be ignored without tools: %v", err)
 	}
 }

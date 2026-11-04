@@ -21,9 +21,6 @@ func NewAnthropic(cfg anthropicprovider.Config) *anthropicprovider.Client {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = BaseURLAnthropic
 	}
-	if cfg.Model == "" {
-		cfg.Model = ModelDeepSeekV4Flash
-	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = 256_000
 	}
@@ -37,9 +34,6 @@ func NewAnthropic(cfg anthropicprovider.Config) *anthropicprovider.Client {
 func NewResponses(cfg openaiprovider.Config) *openaiprovider.Client {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = BaseURLOpenAI
-	}
-	if cfg.Model == "" {
-		cfg.Model = ModelDeepSeekV4Flash
 	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = 1_000_000

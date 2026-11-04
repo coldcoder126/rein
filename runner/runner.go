@@ -29,11 +29,13 @@ var (
 	ErrNotRunning = errors.New("runner: session is not running")
 	// ErrInvalidConfig means the Runner configuration is incomplete.
 	ErrInvalidConfig = errors.New("runner: invalid config")
+
+	errNoModel = errors.New("runner: no model: set Agent.Model or pass WithModel")
 )
 
 // Config is the configuration for creating a Runner.
 type Config struct {
-	// Agent is the Agent to run.
+	// Agent is the Agent to run. Its Model may be nil when every run passes WithModel.
 	// Do not modify it after handing it to the Runner: every run of every session reads this one definition without synchronization.
 	Agent *agent.Agent
 	// Store is the session store; an in-memory store is used when nil.
@@ -137,8 +139,8 @@ type Run struct {
 
 // New creates a Runner.
 func New(cfg Config) (*Runner, error) {
-	if cfg.Agent == nil || cfg.Agent.Model == nil {
-		return nil, fmt.Errorf("%w: Agent and its Model must not be nil", ErrInvalidConfig)
+	if cfg.Agent == nil {
+		return nil, fmt.Errorf("%w: Agent must not be nil", ErrInvalidConfig)
 	}
 	if cfg.Store == nil {
 		cfg.Store = session.NewMemoryStore()

@@ -26,7 +26,7 @@ func main() {
 
 	a := &agent.Agent{
 		Instruction: "You are a helpful assistant.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")}),
+		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
 		Tools:       []tool.Tool{weather},
 	}
 	result, err := a.Run(context.Background(), agent.Text("What's the weather in Paris?"))

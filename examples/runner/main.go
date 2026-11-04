@@ -18,7 +18,7 @@ import (
 func main() {
 	a := &agent.Agent{
 		Instruction: "You are a helpful assistant. Keep answers short.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")}),
+		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
 	}
 	// The in-memory store is for development; implement session.Store for a database.
 	r, err := runner.New(runner.Config{Agent: a, Store: session.NewMemoryStore()})

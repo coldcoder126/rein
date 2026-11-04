@@ -27,8 +27,6 @@ const (
 	ModelClaudeHaiku4_5  = "claude-haiku-4-5"
 
 	providerName = "anthropic"
-
-	defaultModel = ModelClaudeSonnet5_5
 )
 
 // APIKeyProvider resolves the API key dynamically, for short-lived tokens.
@@ -65,10 +63,10 @@ type Client struct {
 	cfg Config
 }
 
-// New creates an Anthropic chat.Client.
+// New creates an Anthropic chat.Client. It panics when cfg.Model is empty.
 func New(cfg Config) *Client {
 	if cfg.Model == "" {
-		cfg.Model = defaultModel
+		panic("anthropic: Config.Model must not be empty")
 	}
 	return &Client{cfg: cfg}
 }

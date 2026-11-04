@@ -35,7 +35,7 @@ func integrationClient(t *testing.T, cfg Config) *Client {
 }
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelGPT6Luna})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func TestIntegrationStreamText(t *testing.T) {
 // Two rounds of tool calls: the second must send back the first round's reasoning items, message ids and function_call ids unchanged;
 // the server rejects any signature replayed wrongly.
 func TestIntegrationToolCallReplay(t *testing.T) {
-	client := integrationClient(t, Config{Reasoning: true})
+	client := integrationClient(t, Config{Model: ModelGPT6Luna, Reasoning: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -115,7 +115,7 @@ func hasSignedThinking(m *chat.Message) bool {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelGPT6Luna})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -152,7 +152,7 @@ func TestIntegrationImageGeneration(t *testing.T) {
 	if os.Getenv("REIN_INTEGRATION_IMAGEGEN") != "1" {
 		t.Skip("set REIN_INTEGRATION_IMAGEGEN=1 to run (image generation is billed)")
 	}
-	client := integrationClient(t, Config{ImageGeneration: true})
+	client := integrationClient(t, Config{Model: ModelGPT6Luna, ImageGeneration: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -192,7 +192,7 @@ func TestIntegrationImageGeneration(t *testing.T) {
 
 // The second round sends back the first round's reasoning item (with encrypted content) and message id unchanged; acceptance by the server proves stateless replay works.
 func TestIntegrationReasoningReplay(t *testing.T) {
-	client := integrationClient(t, Config{Reasoning: true})
+	client := integrationClient(t, Config{Model: ModelGPT6Luna, Reasoning: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -271,7 +271,7 @@ func TestIntegrationToolChoice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := integrationClient(t, Config{})
+			client := integrationClient(t, Config{Model: ModelGPT6Luna})
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			msg, err := chat.Complete(ctx, client, chat.Request{

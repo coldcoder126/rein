@@ -31,7 +31,8 @@ type Result struct {
 
 // Start processes one user input in a session: it occupies the session, stores the input, loads the history and drives the Agent
 // to the end in the background, returning as soon as the run has started. The session is created if it does not exist;
-// an empty sessionID generates a new one, see Run.SessionID. It returns ErrBusy at once when the session already has a run in progress.
+// an empty sessionID generates a new one, see Run.SessionID. It returns ErrBusy at once when the session already has a run in progress,
+// and an error when neither WithModel nor Agent.Model gives a model.
 //
 // The run keeps ctx's values but not its cancellation, so it goes on after the caller returns or a client disconnects;
 // stop it with Abort. Watch it with Run.Events or Subscribe and get its result with Run.Wait.
@@ -49,6 +50,9 @@ func (r *Runner) Start(ctx context.Context, sessionID string, in Input, opts ...
 	var options runOptions
 	for _, opt := range opts {
 		opt(&options)
+	}
+	if r.model(options.model) == nil {
+		return nil, errNoModel
 	}
 	if sessionID == "" {
 		sessionID = newID("session")

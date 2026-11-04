@@ -35,7 +35,7 @@ func serve(t *testing.T, body *string, status int, chunks ...string) *Client {
 		}
 	}))
 	t.Cleanup(server.Close)
-	return New(Config{APIKey: "test", BaseURL: server.URL})
+	return New(Config{Model: ModelGemini3_5Flash, APIKey: "test", BaseURL: server.URL})
 }
 
 func run(t *testing.T, client *Client, req chat.Request) chat.Event {
@@ -139,7 +139,7 @@ func TestRequestBody(t *testing.T) {
 		Messages: []chat.Message{
 			{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")},
 				chat.MediaURL("https://example.com/clip.mp4"), chat.Media([]byte("PK\x03\x04")).WithName("表格.xlsx")}},
-			{Role: chat.RoleAssistant, Provider: providerName, Model: defaultModel, Content: []chat.ContentBlock{
+			{Role: chat.RoleAssistant, Provider: providerName, Model: ModelGemini3_5Flash, Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "无签名的思考"},
 				call("call_1", "c2lnMQ=="), call(generatedIDPrefix+"1", ""),
 			}},
@@ -223,7 +223,7 @@ func TestToolChoiceConfig(t *testing.T) {
 		{Mode: chat.ToolChoiceNone}:     `{"functionCallingConfig":{"mode":"NONE"}}`,
 		chat.ForceTool("lookup"):        `{"functionCallingConfig":{"allowedFunctionNames":["lookup"],"mode":"ANY"}}`,
 	} {
-		_, config, err := New(Config{}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
+		_, config, err := New(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +231,7 @@ func TestToolChoiceConfig(t *testing.T) {
 			t.Fatalf("wrong ToolConfig: %s", raw)
 		}
 	}
-	_, config, _ := New(Config{}).buildRequest(chat.Request{Tools: tools})
+	_, config, _ := New(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Tools: tools})
 	if config.ToolConfig != nil {
 		t.Fatal("ToolConfig should not be sent without ToolChoice")
 	}

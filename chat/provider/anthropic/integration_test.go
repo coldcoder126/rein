@@ -47,7 +47,7 @@ func mustDone(t *testing.T, client *Client, req chat.Request) chat.Message {
 }
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelClaudeSonnet5_5})
 	msg := mustDone(t, client, chat.Request{
 		Options:  chat.Options{MaxTokens: 512},
 		Messages: []chat.Message{chat.NewUserTextMessage("请原样输出这个单词，不要输出别的内容：pong")},
@@ -136,7 +136,7 @@ func TestIntegrationThinkingToolReplay(t *testing.T) {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelClaudeSonnet5_5})
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for y := range 64 {
 		for x := range 64 {

@@ -21,7 +21,6 @@ const (
 
 	providerName = "gemini"
 
-	defaultModel           = ModelGemini3_5Flash
 	defaultMaxInputTokens  = 1_048_576
 	defaultMaxOutputTokens = 65_536
 )
@@ -56,10 +55,10 @@ type Client struct {
 	cfg Config
 }
 
-// New creates a Gemini chat.Client.
+// New creates a Gemini chat.Client. It panics when cfg.Model is empty.
 func New(cfg Config) *Client {
 	if cfg.Model == "" {
-		cfg.Model = defaultModel
+		panic("gemini: Config.Model must not be empty")
 	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = defaultMaxInputTokens

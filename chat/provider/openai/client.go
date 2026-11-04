@@ -19,10 +19,8 @@ import (
 const (
 	providerName = "openai"
 
-	// ModelGPT6Luna is the default model.
 	ModelGPT6Luna = "gpt-6-luna"
 
-	defaultModel           = ModelGPT6Luna
 	defaultMaxInputTokens  = 128_000
 	defaultMaxOutputTokens = 16_384
 )
@@ -64,10 +62,10 @@ type Client struct {
 	cfg Config
 }
 
-// New creates a Responses API chat.Client.
+// New creates a Responses API chat.Client. It panics when cfg.Model is empty.
 func New(cfg Config) *Client {
 	if cfg.Model == "" {
-		cfg.Model = defaultModel
+		panic("openai: Config.Model must not be empty")
 	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = defaultMaxInputTokens

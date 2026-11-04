@@ -8,5 +8,5 @@ import (
 
 // A real model reads a URL image, an inline PDF, and a PDF in a tool result.
 func TestIntegrationMedia(t *testing.T) {
-	chattest.CheckMediaInput(t, integrationClient(t, Config{}))
+	chattest.CheckMediaInput(t, integrationClient(t, Config{Model: ModelGemini3_5Flash}))
 }

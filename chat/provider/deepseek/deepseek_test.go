@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewAnthropicDefaults(t *testing.T) {
-	client := NewAnthropic(anthropicprovider.Config{})
+	client := NewAnthropic(anthropicprovider.Config{Model: ModelDeepSeekV4Flash})
 	info := client.Info()
 	if info.Model != ModelDeepSeekV4Flash {
 		t.Fatalf("wrong default model: %s", info.Model)
@@ -22,7 +22,7 @@ func TestNewAnthropicDefaults(t *testing.T) {
 }
 
 func TestNewResponsesDefaults(t *testing.T) {
-	client := NewResponses(openaiprovider.Config{})
+	client := NewResponses(openaiprovider.Config{Model: ModelDeepSeekV4Flash})
 	info := client.Info()
 	if info.Model != ModelDeepSeekV4Flash {
 		t.Fatalf("wrong default model: %s", info.Model)

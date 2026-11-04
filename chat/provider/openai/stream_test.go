@@ -62,7 +62,7 @@ func completed(outputs string) sseEvent {
 }
 
 func TestStreamFullResponseWithAllItemTypes(t *testing.T) {
-	client := newTestClient(t, Config{}, serveEvents(
+	client := newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(
 		ev("response.created", created),
 		ev("response.output_item.added", `"output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}`),
 		ev("response.reasoning_summary_part.added", `"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}`),
@@ -128,7 +128,7 @@ func TestStreamFullResponseWithAllItemTypes(t *testing.T) {
 func TestStreamReconcilesItemsWithoutDoneEvents(t *testing.T) {
 	// Endpoints that omit output_item.done (such as DeepSeek): items are filled in from the final output of response.completed.
 	deepseekReasoning := `{"id":"rs_ds","type":"reasoning","content":[{"type":"reasoning_text","text":"明文推理"}]}`
-	client := newTestClient(t, Config{DisableStoreParams: true}, serveEvents(
+	client := newTestClient(t, Config{Model: ModelGPT6Luna, DisableStoreParams: true}, serveEvents(
 		ev("response.created", created),
 		ev("response.output_item.added", `"output_index":0,"item":{"id":"rs_ds","type":"reasoning"}`),
 		ev("response.reasoning_text.delta", `"item_id":"rs_ds","output_index":0,"content_index":0,"delta":"明文"`),
@@ -156,7 +156,7 @@ func TestStreamReconcilesItemsWithoutDoneEvents(t *testing.T) {
 }
 
 func TestStreamTruncatedIsRetryableFailureWithPartialContent(t *testing.T) {
-	client := newTestClient(t, Config{}, serveEvents(
+	client := newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(
 		ev("response.created", created),
 		ev("response.output_item.added", `"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[]}`),
 		ev("response.output_text.delta", `"item_id":"msg_1","output_index":0,"content_index":0,"delta":"说到一半"`),
@@ -185,7 +185,7 @@ func TestStreamFailedAndErrorEventsAreClassified(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			events := run(t, newTestClient(t, Config{}, serveEvents(tt.events...)))
+			events := run(t, newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(tt.events...)))
 			final := events[len(events)-1]
 			if final.Type != chat.EventError || final.Message.ErrorKind != tt.want {
 				t.Fatalf("got=%+v want=%s", final.Message.ErrorKind, tt.want)
@@ -198,17 +198,17 @@ func TestStreamIncompleteAndRefusal(t *testing.T) {
 	incomplete := func(reason string) sseEvent {
 		return ev("response.incomplete", fmt.Sprintf(`"response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"%s"},"output":[]}`, reason))
 	}
-	events := run(t, newTestClient(t, Config{}, serveEvents(ev("response.created", created), incomplete("max_output_tokens"))))
+	events := run(t, newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(ev("response.created", created), incomplete("max_output_tokens"))))
 	if final := events[len(events)-1]; final.Type != chat.EventDone || final.Reason != chat.StopReasonLength {
 		t.Fatalf("max_output_tokens should be length: %+v", final)
 	}
 
-	events = run(t, newTestClient(t, Config{}, serveEvents(ev("response.created", created), incomplete("content_filter"))))
+	events = run(t, newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(ev("response.created", created), incomplete("content_filter"))))
 	if final := events[len(events)-1]; final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal {
 		t.Fatalf("content_filter should be a refusal: %+v", final)
 	}
 
-	events = run(t, newTestClient(t, Config{}, serveEvents(
+	events = run(t, newTestClient(t, Config{Model: ModelGPT6Luna}, serveEvents(
 		ev("response.created", created),
 		ev("response.refusal.delta", `"item_id":"msg_1","output_index":0,"content_index":0,"delta":"我不能帮助"`),
 		completed(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"refusal","refusal":"我不能帮助"}]}`),
@@ -220,7 +220,7 @@ func TestStreamIncompleteAndRefusal(t *testing.T) {
 }
 
 func TestStreamHTTPErrorIsClassified(t *testing.T) {
-	client := newTestClient(t, Config{}, func(w http.ResponseWriter, _ *http.Request) {
+	client := newTestClient(t, Config{Model: ModelGPT6Luna}, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}`)
@@ -231,7 +231,7 @@ func TestStreamHTTPErrorIsClassified(t *testing.T) {
 		t.Fatalf("401 should be an auth failure and keep the status code: %+v", final)
 	}
 
-	client = newTestClient(t, Config{}, func(w http.ResponseWriter, _ *http.Request) {
+	client = newTestClient(t, Config{Model: ModelGPT6Luna}, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, `{"error":{"message":"Your input exceeds the context window of this model.","type":"invalid_request_error","code":"context_length_exceeded"}}`)
@@ -245,7 +245,7 @@ func TestStreamHTTPErrorIsClassified(t *testing.T) {
 func TestStreamCancellationIsAborted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
-	client := newTestClient(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, Config{Model: ModelGPT6Luna}, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "event: response.created\ndata: "+ev("response.created", created).data+"\n\n")
 		w.(http.Flusher).Flush()
@@ -265,7 +265,7 @@ func TestStreamCancellationIsAborted(t *testing.T) {
 
 func TestRequestIsSentToResponsesEndpoint(t *testing.T) {
 	var path, auth string
-	client := newTestClient(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, Config{Model: ModelGPT6Luna}, func(w http.ResponseWriter, r *http.Request) {
 		path, auth = r.URL.Path, r.Header.Get("Authorization")
 		serveEvents(ev("response.created", created), completed(""))(w, r)
 	})

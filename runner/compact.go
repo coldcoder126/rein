@@ -296,6 +296,9 @@ func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOpti
 	if r.compactor == nil {
 		return nil, chat.Usage{}, errors.New("runner: compaction is disabled")
 	}
+	if r.model(opts.Model) == nil {
+		return nil, chat.Usage{}, errNoModel
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	h, err := r.acquire(sessionID, cancel, true)
 	if err != nil {

@@ -613,8 +613,21 @@ func TestNewRejectsIncompleteConfig(t *testing.T) {
 	if _, err := New(Config{}); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("a missing Agent should fail: %v", err)
 	}
-	if _, err := New(Config{Agent: &agent.Agent{}}); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("an Agent without a Model should fail: %v", err)
+}
+
+func TestAgentModelIsOptionalWhenRunsPassOne(t *testing.T) {
+	r, store := newRunner(t, nil)
+	if _, err := r.Start(bg, "s", Text("你好")); !errors.Is(err, errNoModel) {
+		t.Fatalf("a run without any model should fail at once: %v", err)
+	}
+	if _, _, err := r.Compact(bg, "s", CompactOptions{}); !errors.Is(err, errNoModel) {
+		t.Fatalf("a compaction without any model should fail at once: %v", err)
+	}
+	if msgs, _ := store.ListMessages(bg, "s"); len(msgs) != 0 {
+		t.Fatal("nothing should be stored when there is no model")
+	}
+	if _, err := runSync(r, bg, "s", Text("你好"), WithModel(newClient(chattest.Say("好")))); err != nil {
+		t.Fatal(err)
 	}
 }
 

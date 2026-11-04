@@ -75,7 +75,7 @@ var metricTool = []chat.ToolDef{{
 }}
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
 	msg := mustDone(t, client, chat.Request{
 		Options:  chat.Options{MaxTokens: 512},
 		Messages: []chat.Message{chat.NewUserTextMessage("请原样输出这个单词，不要输出别的内容：pong")},
@@ -160,7 +160,7 @@ func TestIntegrationThinkingToolReplay(t *testing.T) {
 
 // Tool calls left by other models have no thought signature and should not be rejected when replayed to Gemini.
 func TestIntegrationForeignToolHistory(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
 	msg := mustDone(t, client, chat.Request{
 		Tools: metricTool,
 		Messages: []chat.Message{
@@ -180,7 +180,7 @@ func TestIntegrationForeignToolHistory(t *testing.T) {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{})
+	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
 	msg := mustDone(t, client, chat.Request{
 		Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.Text("这张图是什么颜色？只回答一个英文单词。"),

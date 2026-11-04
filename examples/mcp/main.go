@@ -31,7 +31,7 @@ func main() {
 
 	a := &agent.Agent{
 		Instruction: "You are a helpful assistant.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")}),
+		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
 		Toolsets:    []tool.Toolset{server}, // the tool is offered to the model as mcp__text__reverse
 	}
 	result, err := a.Run(context.Background(), agent.Text("Reverse the string 'hello, rein' with the tool."))
