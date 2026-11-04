@@ -53,6 +53,9 @@ type Config struct {
 	TextOnly bool
 	// NoStructuredOutput means the endpoint does not support the json_schema output format; the format requirements go into the system prompt instead.
 	NoStructuredOutput bool
+	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "openai" for the
+	// official endpoint and to none for a custom BaseURL; set it per project when keys of several projects are in use.
+	FileScope string
 	// HTTPHooks are debugging hooks at the raw HTTP layer.
 	HTTPHooks chat.HTTPHooks
 }
@@ -118,6 +121,7 @@ func (c *Client) Info() chat.ModelInfo {
 		SupportsMedia:    !c.cfg.TextOnly,
 		ImageOutput:      !c.cfg.TextOnly,
 		StructuredOutput: !c.cfg.NoStructuredOutput,
+		FileScope:        c.fileScope(),
 		ImageLimits:      chat.DefaultImageLimits,
 	}
 }

@@ -3,6 +3,7 @@ package chat
 import (
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -30,6 +31,7 @@ func WithToolCallIDNormalizer(fn func(id string) string) NormalizeOption {
 //   - downgrades thinking blocks from other models to text and drops redacted ones; tool call IDs can be normalized,
 //     and provider-private signatures on text and tool call blocks, valid only for the original model, are cleared across models;
 //   - when the target endpoint does not support media input (see ModelInfo.SupportsMedia), replaces media in user messages and tool results with a note;
+//     uploaded files the target cannot reach (another FileScope, or about to expire) fall back to the block's data or URL, or to a note;
 //   - when the target model cannot replay generated images, replaces images in assistant messages with placeholder text; otherwise keeps them, without signatures across models.
 func NormalizeForModel(msgs []Message, target ModelInfo, opts ...NormalizeOption) []Message {
 	var cfg normalizeConfig
@@ -37,18 +39,15 @@ func NormalizeForModel(msgs []Message, target ModelInfo, opts ...NormalizeOption
 		opt(&cfg)
 	}
 
+	now := time.Now()
 	idMap := make(map[string]string)
 	transformed := make([]Message, 0, len(msgs))
 	for _, msg := range msgs {
 		switch msg.Role {
 		case RoleUser:
-			if !target.SupportsMedia {
-				msg.Content = replaceMedia(msg.Content)
-			}
+			msg.Content = adaptMedia(msg.Content, target, now)
 		case RoleTool:
-			if !target.SupportsMedia {
-				msg.Content = replaceMedia(msg.Content)
-			}
+			msg.Content = adaptMedia(msg.Content, target, now)
 			if id, ok := idMap[msg.ToolCallID]; ok {
 				msg.ToolCallID = id
 			}
@@ -177,15 +176,20 @@ func isPending(pending []ToolCall, id string) bool {
 	return false
 }
 
-// replaceMedia replaces media blocks with a note, returning the blocks unchanged when there are none.
-func replaceMedia(blocks []ContentBlock) []ContentBlock {
+// adaptMedia replaces media blocks with a note when the target does not accept media, and otherwise resolves their uploaded files;
+// it returns the blocks unchanged when there is no media.
+func adaptMedia(blocks []ContentBlock, target ModelInfo, now time.Time) []ContentBlock {
 	if !slices.ContainsFunc(blocks, ContentBlock.IsMedia) {
 		return blocks
 	}
 	out := make([]ContentBlock, len(blocks))
 	for i, block := range blocks {
 		if block.IsMedia() {
-			block = mediaPlaceholder(block)
+			if target.SupportsMedia {
+				block = resolveFile(block, target.FileScope, now)
+			} else {
+				block = mediaPlaceholder(block)
+			}
 		}
 		out[i] = block
 	}

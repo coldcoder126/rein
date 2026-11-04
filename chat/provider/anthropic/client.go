@@ -54,6 +54,9 @@ type Config struct {
 	// UnsignedThinking means the endpoint's thinking blocks carry no signature and are replayed as is;
 	// by default unsigned thinking blocks are downgraded to text, because Anthropic rejects them.
 	UnsignedThinking bool
+	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
+	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
+	FileScope string
 	// HTTPHooks are debugging hooks at the raw HTTP layer.
 	HTTPHooks chat.HTTPHooks
 }
@@ -195,6 +198,7 @@ func (c *Client) Info() chat.ModelInfo {
 		MaxOutputTokens:  spec.maxOutput,
 		SupportsMedia:    !c.cfg.TextOnly,
 		StructuredOutput: spec.structuredOutput,
+		FileScope:        c.fileScope(),
 		ImageLimits:      chat.DefaultImageLimits,
 	}
 }

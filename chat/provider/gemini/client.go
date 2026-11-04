@@ -46,6 +46,9 @@ type Config struct {
 	// ImageGeneration means the model can generate images (such as the gemini-*-image models):
 	// requests ask for both TEXT and IMAGE output, and generated images in history are replayed as is.
 	ImageGeneration bool
+	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "gemini" for the official
+	// Gemini API endpoint and to none on Vertex (which has no Files API; use gs:// URLs) or a custom BaseURL.
+	FileScope string
 	// HTTPHooks are debugging hooks at the raw HTTP layer.
 	HTTPHooks chat.HTTPHooks
 }
@@ -79,6 +82,7 @@ func (c *Client) Info() chat.ModelInfo {
 		SupportsMedia:    true,
 		StructuredOutput: true,
 		ImageOutput:      c.cfg.ImageGeneration,
+		FileScope:        c.fileScope(),
 		ImageLimits:      chat.DefaultImageLimits,
 	}
 }

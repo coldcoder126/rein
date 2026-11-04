@@ -42,6 +42,9 @@ type ModelInfo struct {
 	// StructuredOutput reports whether the model natively supports output constrained by a JSON Schema;
 	// when false, the provider writes the format requirements into the system prompt.
 	StructuredOutput bool
+	// FileScope names the file store this endpoint reads uploaded files from (see FileRef.Scope), empty when it reads none.
+	// Media blocks whose file belongs to another scope fall back to their data or URL on replay.
+	FileScope string
 	// ImageLimits are the image specs the model accepts, for callers that process images with imageproc; zero fields use the defaults.
 	ImageLimits ImageLimits
 }

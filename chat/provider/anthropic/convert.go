@@ -244,9 +244,23 @@ func toolResultBlock(m chat.Message) (goanthropic.ContentBlockParamUnion, error)
 	}}, nil
 }
 
-// mediaBlock converts a media block into an Anthropic image or document block, exactly one of which is non-nil: images and PDFs
-// support inline data and URLs, text files become plain text documents (inline only). Media the Messages API has no input for returns an error and the caller decides what to do.
+// mediaBlock converts a media block into an Anthropic image or document block, exactly one of which is non-nil: uploaded files
+// are referred to by ID, images and PDFs support inline data and URLs, text files become plain text documents (inline only). Media the Messages API has no input for returns an error and the caller decides what to do.
 func mediaBlock(block chat.ContentBlock) (*goanthropic.ImageBlockParam, *goanthropic.DocumentBlockParam, error) {
+	if block.File != nil {
+		// NormalizeForModel keeps a file only when this endpoint can read it; the Files API checks the type itself.
+		if block.IsImage() {
+			image := &goanthropic.ImageBlockParam{}
+			image.Source.OfFile = &goanthropic.FileImageSourceParam{FileID: block.File.ID}
+			return image, nil, nil
+		}
+		document := &goanthropic.DocumentBlockParam{}
+		if block.Name != "" {
+			document.Title = goanthropic.String(block.Name)
+		}
+		document.Source.OfFile = &goanthropic.FileDocumentSourceParam{FileID: block.File.ID}
+		return nil, document, nil
+	}
 	inline := len(block.Data) > 0
 	if !inline && block.URL == "" {
 		return nil, nil, &chat.Error{Kind: chat.KindInvalidRequest, Message: "anthropic: media block has neither data nor URL"}

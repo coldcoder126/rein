@@ -36,12 +36,14 @@ type ContentBlock struct {
 	Signature string `json:"signature,omitempty"`
 	// Redacted marks a thinking block hidden by safety policy; only Signature is meaningful.
 	Redacted bool `json:"redacted,omitempty"`
-	// The next four fields describe a media block: MIMEType decides how the model handles it, the content comes from either
-	// Data (inline) or URL, and Name is an optional file name.
-	MIMEType string `json:"mime_type,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Name     string `json:"name,omitempty"`
+	// The next five fields describe a media block: MIMEType decides how the model handles it, the content comes from
+	// File (a file uploaded to the provider), Data (inline) or URL, and Name is an optional file name.
+	// File is used when the target model can reach it; otherwise Data or URL is the fallback, see NormalizeForModel.
+	MIMEType string   `json:"mime_type,omitempty"`
+	Data     []byte   `json:"data,omitempty"`
+	URL      string   `json:"url,omitempty"`
+	File     *FileRef `json:"file,omitempty"`
+	Name     string   `json:"name,omitempty"`
 	// ToolCall is the content of a tool call block.
 	ToolCall *ToolCall `json:"tool_call,omitempty"`
 }

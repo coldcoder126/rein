@@ -172,8 +172,11 @@ func convertMessages(messages []chat.Message, multimodalResults bool) ([]*genai.
 	return contents, nil
 }
 
-// mediaPart converts a media block into a part: inline data or a file URI, the same path for every MIME type.
+// mediaPart converts a media block into a part: an uploaded file, inline data or a file URI, the same path for every MIME type.
 func mediaPart(block chat.ContentBlock) *genai.Part {
+	if block.File != nil {
+		return &genai.Part{FileData: &genai.FileData{MIMEType: block.MIMEType, FileURI: block.File.ID}}
+	}
 	if block.URL != "" {
 		return &genai.Part{FileData: &genai.FileData{MIMEType: block.MIMEType, FileURI: block.URL}}
 	}

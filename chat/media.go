@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 )
 
 // Media creates an inline media block: an image, PDF, audio, video, text file or any other content.
@@ -32,6 +33,32 @@ func MediaURL(rawURL string) ContentBlock {
 		}
 	}
 	return block
+}
+
+// FileRef refers to a file uploaded to a provider's file store, such as the Anthropic or OpenAI Files API, so requests carry
+// an ID instead of the content. Provider clients' UploadFile returns a media block with it filled in.
+//
+// File IDs are readable by every key of the store (an Anthropic workspace, an OpenAI project): create and keep them on the
+// server side and never accept them from end users, or one user can read another's files.
+type FileRef struct {
+	// Scope names the store the file lives in and must equal the target model's ModelInfo.FileScope for the file to be used.
+	Scope string `json:"scope"`
+	// ID is the provider's file ID; for Gemini it is the file URI.
+	ID string `json:"id"`
+	// ExpiresAt is when the store deletes the file, zero for never; shortly before it the file is no longer used.
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+}
+
+// MediaFile creates a media block that refers to an uploaded file. mimeType is required: it decides whether the file is sent as an image or a document.
+// Without a fallback the block becomes a note when the target model cannot reach the file; prefer WithFile on a block that keeps the URL or data.
+func MediaFile(file FileRef, mimeType string) ContentBlock {
+	return ContentBlock{Type: ContentTypeMedia, File: &file, MIMEType: mimeType}
+}
+
+// WithFile returns the media block referring to an uploaded file; its URL or data stays as the fallback for models that cannot reach the file.
+func (b ContentBlock) WithFile(file FileRef) ContentBlock {
+	b.File = &file
+	return b
 }
 
 // WithMIME returns the media block with the given MIME type.
@@ -106,9 +133,29 @@ func mimeByExtension(name string) string {
 
 // mediaPlaceholder returns the note that replaces a media block where the endpoint does not support media input.
 func mediaPlaceholder(b ContentBlock) ContentBlock {
-	desc := b.MIMEType
-	if b.Name != "" {
-		desc = b.Name + ", " + desc
+	return Text(fmt.Sprintf("(attachment omitted: this model does not accept media input: %s)", mediaDescription(b)))
+}
+
+// fileExpiryMargin is how long before FileRef.ExpiresAt a file is no longer used, so a request does not race the deletion.
+const fileExpiryMargin = 5 * time.Minute
+
+// resolveFile keeps the file reference of a media block only when the target scope can still read the file; otherwise it falls back
+// to the block's data or URL, or, with neither, to a note.
+func resolveFile(b ContentBlock, scope string, now time.Time) ContentBlock {
+	f := b.File
+	if f == nil || (f.Scope != "" && f.Scope == scope && (f.ExpiresAt.IsZero() || now.Add(fileExpiryMargin).Before(f.ExpiresAt))) {
+		return b
 	}
-	return Text(fmt.Sprintf("(attachment omitted: this model does not accept media input: %s)", desc))
+	b.File = nil
+	if len(b.Data) > 0 || b.URL != "" {
+		return b
+	}
+	return Text(fmt.Sprintf("(attachment omitted: the file is not available to this model: %s)", mediaDescription(b)))
+}
+
+func mediaDescription(b ContentBlock) string {
+	if b.Name != "" {
+		return b.Name + ", " + b.MIMEType
+	}
+	return b.MIMEType
 }

@@ -3,6 +3,7 @@ package chat_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coldcoder126/rein/chat"
 )
@@ -128,6 +129,46 @@ func TestNormalizeReplacesMediaForTextOnlyEndpoint(t *testing.T) {
 		if block.Type != chat.ContentTypeMedia {
 			t.Fatalf("an endpoint with media support should not filter by type, block %d changed: %+v", i, block)
 		}
+	}
+}
+
+func TestNormalizeUsesFilesOnlyWhereTheyCanBeRead(t *testing.T) {
+	target := chat.ModelInfo{Provider: "anthropic", Model: "claude", SupportsMedia: true, FileScope: "anthropic"}
+	file := func(scope string, expires time.Time) chat.FileRef {
+		return chat.FileRef{Scope: scope, ID: "file_1", ExpiresAt: expires}
+	}
+	withURL := chat.MediaURL("https://example.com/a.pdf")
+	cases := []struct {
+		name  string
+		block chat.ContentBlock
+		want  func(chat.ContentBlock) bool
+	}{
+		{"same scope keeps the file", withURL.WithFile(file("anthropic", time.Time{})),
+			func(b chat.ContentBlock) bool { return b.File != nil && b.File.ID == "file_1" }},
+		{"not yet expiring keeps the file", withURL.WithFile(file("anthropic", time.Now().Add(time.Hour))),
+			func(b chat.ContentBlock) bool { return b.File != nil }},
+		{"another scope falls back to the URL", withURL.WithFile(file("openai", time.Time{})),
+			func(b chat.ContentBlock) bool { return b.File == nil && b.URL == withURL.URL }},
+		{"about to expire falls back to the URL", withURL.WithFile(file("anthropic", time.Now().Add(time.Minute))),
+			func(b chat.ContentBlock) bool { return b.File == nil && b.URL == withURL.URL }},
+		{"no fallback becomes a note", chat.MediaFile(file("openai", time.Time{}), "application/pdf").WithName("a.pdf"),
+			func(b chat.ContentBlock) bool {
+				return b.Type == chat.ContentTypeText && strings.Contains(b.Text, "not available to this model: a.pdf, application/pdf")
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{tc.block}}, assistant("anthropic", "claude",
+				toolCallBlock("c1", "read")), {Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{tc.block}}}
+			out := chat.NormalizeForModel(msgs, target)
+			if !tc.want(out[0].Content[0]) || !tc.want(out[2].Content[0]) {
+				t.Fatalf("user message and tool result should both resolve the file: %+v / %+v", out[0].Content[0], out[2].Content[0])
+			}
+		})
+	}
+	if out := chat.NormalizeForModel([]chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{withURL.WithFile(file("", time.Time{}))}}},
+		chat.ModelInfo{SupportsMedia: true}); out[0].Content[0].File != nil {
+		t.Fatal("an endpoint without a file store should never use files")
 	}
 }
 

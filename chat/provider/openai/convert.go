@@ -166,8 +166,15 @@ func userContent(blocks []chat.ContentBlock) ([]map[string]any, error) {
 	return content, nil
 }
 
-// mediaPart converts a media block into Responses input content: input_image for images and input_file for everything else, both inline or by URL.
+// mediaPart converts a media block into Responses input content: input_image for images and input_file for everything else,
+// by uploaded file ID, inline or by URL.
 func mediaPart(block chat.ContentBlock) map[string]any {
+	if block.File != nil {
+		if block.IsImage() {
+			return map[string]any{"type": "input_image", "detail": "auto", "file_id": block.File.ID}
+		}
+		return map[string]any{"type": "input_file", "file_id": block.File.ID}
+	}
 	inline := len(block.Data) > 0
 	source := block.URL
 	if inline {
