@@ -13,7 +13,7 @@ import (
 	"github.com/coldcoder126/rein/tool"
 )
 
-// Result is the result of a run. It is still valid when Run returns an error and contains the messages produced so far.
+// Result is the result of a run. It is still valid when Run.Wait returns an error and contains the messages produced so far.
 type Result struct {
 	SessionID string
 	RunID     string
@@ -29,64 +29,16 @@ type Result struct {
 	Pending Queue
 }
 
-// Run processes one user input in a session: it stores it, loads the history and drives the Agent to the end.
-// The session is created if it does not exist; an empty sessionID generates a new one, see Result.SessionID.
-// It returns ErrBusy when the session already has a run in progress.
+// Start processes one user input in a session: it occupies the session, stores the input, loads the history and drives the Agent
+// to the end in the background, returning as soon as the run has started. The session is created if it does not exist;
+// an empty sessionID generates a new one, see Run.SessionID. It returns ErrBusy at once when the session already has a run in progress.
+//
+// The run keeps ctx's values but not its cancellation, so it goes on after the caller returns or a client disconnects;
+// stop it with Abort. Watch it with Run.Events or Subscribe and get its result with Run.Wait.
 //
 // An empty in (Input{}) appends no new input and continues from the existing history, for example to wake the main Agent after a background
 // task's result was written to history; the history must then end with a user-side message or a tool result.
-//
-// When a model call fails, the run is canceled or the turn limit is reached, a non-nil error is returned and Result is still valid:
-// Status gives the end status and Messages the messages produced and stored so far.
-func (r *Runner) Run(ctx context.Context, sessionID string, in Input, opts ...RunOption) (*Result, error) {
-	return r.run(ctx, sessionID, in, opts, nil)
-}
-
-// Stream does the same as Run and hands the events of the run to the caller one by one.
-//
-// The run follows the caller: it continues only after an event is taken, and stops when the caller stops iterating or ctx is canceled.
-// To keep a run going after a client disconnects, or to fan events out to several receivers, iterate and forward in your own goroutine.
-//
-// error appears at most once, in the last iteration, with the same meaning as Run's return value. Once the run has started,
-// the last event is run_end and its Result is the run result; when it could not start (for example ErrBusy) the event is the zero value.
-func (r *Runner) Stream(ctx context.Context, sessionID string, in Input, opts ...RunOption) iter.Seq2[Event, error] {
-	return func(yield func(Event, error) bool) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		events := make(chan Event)
-		// stopped is closed when iteration ends, so the run no longer waits for the caller to take events.
-		stopped := make(chan struct{})
-		defer close(stopped)
-		var err error
-		go func() {
-			defer close(events)
-			_, err = r.run(ctx, sessionID, in, opts, func(event Event) {
-				select {
-				case events <- event:
-				case <-stopped:
-				}
-			})
-		}()
-
-		var end Event
-		for event := range events {
-			if event.Type == EventRunEnd {
-				end = event
-				continue
-			}
-			if !yield(event, nil) {
-				// The caller stopped receiving: cancel the run and wait for it to end; afterwards the session can run again.
-				cancel()
-				for range events {
-				}
-				return
-			}
-		}
-		yield(end, err)
-	}
-}
-
-func (r *Runner) run(ctx context.Context, sessionID string, in Input, opts []RunOption, sink func(Event)) (*Result, error) {
+func (r *Runner) Start(ctx context.Context, sessionID string, in Input, opts ...RunOption) (*Run, error) {
 	var content []chat.ContentBlock
 	if len(in.Content) > 0 {
 		var err error
@@ -101,28 +53,137 @@ func (r *Runner) run(ctx context.Context, sessionID string, in Input, opts []Run
 	if sessionID == "" {
 		sessionID = newID("session")
 	}
+	ctx = context.WithoutCancel(ctx)
 	runCtx, cancel := context.WithCancel(ctx)
-	h, err := r.acquire(sessionID, cancel, false)
+	run, err := r.acquire(sessionID, cancel, false)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	defer r.release(sessionID, h)
+	go func() {
+		run.result, run.err = r.process(ctx, runCtx, run, content, options)
+		r.release(sessionID, run)
+	}()
+	return run, nil
+}
 
-	info := tool.RunInfo{SessionID: sessionID, RunID: h.runID, RootSessionID: sessionID}
+// ID returns the run ID, which every message stored by the run carries.
+func (run *Run) ID() string { return run.id }
+
+// SessionID returns the ID of the session the run belongs to.
+func (run *Run) SessionID() string { return run.sessionID }
+
+// Wait waits for the run to end and returns its result. When the model fails, the run is aborted or the turn limit is reached,
+// a non-nil error is returned and Result is still valid: Status gives the end status and Messages the messages produced and stored so far.
+// ctx only bounds the waiting and does not stop the run. Once Wait returns, the session is free for the next run.
+func (run *Run) Wait(ctx context.Context) (*Result, error) {
+	select {
+	case <-run.done:
+		return run.result, run.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Events returns the events of the run from the first one, then each new one as it happens, ending after run_end or when ctx is done.
+// Any number of receivers can iterate, each at its own pace, and a slow receiver never holds up the run. Call Wait for the run's error.
+//
+// The events are kept in memory while the Run is referenced. To bound that, a replayed message_update keeps only its delta
+// once a newer message_update exists (AgentEvent.Message is nil); message_end carries the complete message.
+func (run *Run) Events(ctx context.Context) iter.Seq[Event] {
+	return func(yield func(Event) bool) {
+		mu := &run.r.mu
+		for next := 0; ; {
+			mu.Lock()
+			batch := slices.Clone(run.events[next:])
+			finished, wake := run.finished, run.wake
+			mu.Unlock()
+			for _, event := range batch {
+				if !yield(event) {
+					return
+				}
+			}
+			next += len(batch)
+			if len(batch) > 0 {
+				continue
+			}
+			if finished {
+				return
+			}
+			select {
+			case <-wake:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// Subscribe follows a session: it replays the events of the run in progress, if any, from its start, then hands over the events of
+// that run and of every later run of the session as they happen, until ctx is done. While the session is idle it waits for the next run.
+// It suits views that attach to a session at any time, such as a page reopened in the middle of a reply; earlier runs are read from the store.
+func (r *Runner) Subscribe(ctx context.Context, sessionID string) iter.Seq[Event] {
+	return func(yield func(Event) bool) {
+		var last *Run
+		for ctx.Err() == nil {
+			r.mu.Lock()
+			run := r.active[sessionID]
+			if run == nil || run == last {
+				// Wait for the next occupation of the session; the current one, if any, has been followed already.
+				w := r.waiters[sessionID]
+				if w == nil {
+					w = &waiter{ch: make(chan struct{})}
+					r.waiters[sessionID] = w
+				}
+				w.n++
+				r.mu.Unlock()
+				select {
+				case <-w.ch:
+				case <-ctx.Done():
+					r.mu.Lock()
+					if w.n--; w.n == 0 && r.waiters[sessionID] == w {
+						delete(r.waiters, sessionID)
+					}
+					r.mu.Unlock()
+				}
+				continue
+			}
+			r.mu.Unlock()
+			last = run
+			for event := range run.Events(ctx) {
+				if !yield(event) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// waiter wakes the Subscribe calls waiting for the next run of an idle session: ch is closed when the session is occupied again,
+// and n counts the waiters so that the last one to give up removes it.
+type waiter struct {
+	ch chan struct{}
+	n  int
+}
+
+// process drives one run on the run's goroutine. ctx carries the caller's values without cancellation and is used for the work
+// that must finish anyway; runCtx is canceled by Abort.
+func (r *Runner) process(ctx, runCtx context.Context, run *Run, content []chat.ContentBlock, options runOptions) (*Result, error) {
+	sessionID := run.sessionID
+	info := tool.RunInfo{SessionID: sessionID, RunID: run.id, RootSessionID: sessionID}
 	if parent := options.parent; parent != nil {
 		info.ParentSessionID, info.RootSessionID = parent.SessionID, parent.RootSessionID
 	}
-	st := &runState{r: r, handle: h, sink: sink, info: info, model: r.model(options.model), result: &Result{SessionID: sessionID, RunID: h.runID}}
+	st := &runState{r: r, handle: run, info: info, model: r.model(options.model), result: &Result{SessionID: sessionID, RunID: run.id}}
 	st.emit(Event{Type: EventRunStart})
-	err = st.execute(runCtx, content, options)
+	err := st.execute(runCtx, content, options)
 
 	r.mu.Lock()
-	h.ending = true
-	notices := h.notices
-	h.notices = nil
-	st.result.Pending = h.drainQueues()
-	h.queueChanged = h.queueChanged || len(st.result.Pending.Steer)+len(st.result.Pending.FollowUp) > 0
+	run.ending = true
+	notices := run.notices
+	run.notices = nil
+	st.result.Pending = run.drainQueues()
+	run.queueChanged = run.queueChanged || len(st.result.Pending.Steer)+len(st.result.Pending.FollowUp) > 0
 	r.mu.Unlock()
 	// Of the messages taken but not injected, steer messages go back to the caller, and task result notices go before those still queued.
 	var steer, unseen []session.Message
@@ -139,7 +200,7 @@ func (r *Runner) run(ctx context.Context, sessionID string, in Input, opts []Run
 		err = saveErr
 	}
 	r.mu.Lock()
-	h.notifyDelivered(ResultSavedToHistory, nil)
+	run.notifyDelivered(ResultSavedToHistory, nil)
 	r.mu.Unlock()
 	if st.result.Status == "" {
 		st.result.Status = agent.StatusFailed
@@ -153,10 +214,10 @@ func (r *Runner) run(ctx context.Context, sessionID string, in Input, opts []Run
 // The part shared with others is in handle and requires Runner.mu.
 type runState struct {
 	r      *Runner
-	handle *runHandle
-	// sink receives the events of this run; when nil no events are produced.
-	sink func(Event)
-	info tool.RunInfo
+	handle *Run
+	// silent means the occupation records no events (manual compaction).
+	silent bool
+	info   tool.RunInfo
 	// model is the model of this run: the one given by WithModel, or Agent.Model.
 	model  chat.Client
 	result *Result
@@ -176,24 +237,51 @@ type injectBatch struct {
 	saved     bool
 }
 
-// emit hands an event to the caller. When the queues were changed by calls outside the run, a queue_update is emitted first,
-// so every event is sent in order by the run itself.
+// emit records an event in the run's log for its receivers. When the queues were changed by calls outside the run, a queue_update
+// is recorded first, so every event is recorded in order by the run itself.
 func (st *runState) emit(event Event) {
-	if st.sink == nil {
+	if st.silent {
 		return
 	}
+	h := st.handle
 	st.r.mu.Lock()
-	var queue *Queue
-	if st.handle.queueChanged {
-		st.handle.queueChanged = false
-		queue = &Queue{Steer: session.CloneMessages(st.handle.steer), FollowUp: session.CloneMessages(st.handle.followUp)}
-	}
-	st.r.mu.Unlock()
-	if queue != nil {
-		st.sink(Event{Type: EventQueueUpdate, SessionID: st.info.SessionID, RunID: st.info.RunID, Queue: queue})
+	defer st.r.mu.Unlock()
+	if h.queueChanged {
+		h.queueChanged = false
+		queue := &Queue{Steer: session.CloneMessages(h.steer), FollowUp: session.CloneMessages(h.followUp)}
+		h.record(Event{Type: EventQueueUpdate, SessionID: st.info.SessionID, RunID: st.info.RunID, Queue: queue})
 	}
 	event.SessionID, event.RunID = st.info.SessionID, st.info.RunID
-	st.sink(event)
+	h.record(event)
+}
+
+// record appends an event to the log and wakes the receivers. Only the latest message_update keeps its message snapshot:
+// every snapshot holds the whole message so far, and keeping one per delta would grow quadratically with the reply.
+// The caller must hold Runner.mu.
+func (run *Run) record(event Event) {
+	if event.AgentEvent != nil && event.AgentEvent.Type == agent.EventMessageUpdate {
+		if i := run.lastUpdate; i >= 0 {
+			run.events[i] = withoutSnapshot(run.events[i])
+		}
+		run.lastUpdate = len(run.events)
+	}
+	run.events = append(run.events, event)
+	close(run.wake)
+	run.wake = make(chan struct{})
+}
+
+// withoutSnapshot returns a copy of a message_update event without its message snapshot, keeping the delta.
+// It copies rather than modifies, since receivers may still hold the original.
+func withoutSnapshot(event Event) Event {
+	ae := *event.AgentEvent
+	ae.Message = nil
+	if ae.AssistantEvent != nil {
+		ce := *ae.AssistantEvent
+		ce.Message = nil
+		ae.AssistantEvent = &ce
+	}
+	event.AgentEvent = &ae
+	return event
 }
 
 func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, options runOptions) error {

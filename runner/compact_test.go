@@ -41,7 +41,7 @@ func compactRunner(t *testing.T, limit int, scripts ...chattest.Script) (*Runner
 
 func submit(t *testing.T, r *Runner, text string) *Result {
 	t.Helper()
-	result, err := r.Run(bg, "c", Text(text))
+	result, err := runSync(r, bg, "c", Text(text))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,21 +145,17 @@ func TestCompactionOnOverflowRetriesOnce(t *testing.T) {
 	)
 	submit(t, h, "问题一")
 	submit(t, h, "问题二")
-	var result *Result
 	var starts int
 	var turns []int
-	for event, err := range h.Stream(bg, "c", Text("问题三")) {
-		if err != nil {
-			t.Fatal(err)
-		}
+	result, err := stream(h, bg, "c", Text("问题三"), func(event Event) {
 		if ae := event.AgentEvent; ae != nil && ae.Type == agent.EventAgentStart {
 			starts++
 		} else if ae != nil && ae.Type == agent.EventTurnStart {
 			turns = append(turns, ae.TurnIndex)
 		}
-		if event.Result != nil {
-			result = event.Result
-		}
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if result.Status != agent.StatusCompleted || result.Final.Text() != "恢复了" {
 		t.Fatalf("should compact and retry successfully after an overflow: %s %q", result.Status, result.Final.Text())
@@ -171,7 +167,7 @@ func TestCompactionOnOverflowRetriesOnce(t *testing.T) {
 		t.Fatalf("the retried request should use the compacted context: %s", got)
 	}
 
-	_, err := h.Run(bg, "c", Text("问题四"))
+	_, err = runSync(h, bg, "c", Text("问题四"))
 	if ce := chat.AsError(err); ce == nil || ce.Kind != chat.KindContextLength || len(client.Requests()) != 8 {
 		t.Fatalf("an overflow after the retry should return an error, retrying only once: %v requests %d", err, len(client.Requests()))
 	}
@@ -213,7 +209,7 @@ func TestManualCompaction(t *testing.T) {
 	options := chat.Options{MaxTokens: 100, CacheRetention: chat.CacheRetentionShort, Reasoning: chat.ReasoningLow}
 	r, _ := newRunner(t, custom, func(cfg *Config) { cfg.Compactor = SummaryCompactor{Options: options} })
 	for range 2 {
-		if _, err := r.Run(bg, "c", Text("问题")); err != nil {
+		if _, err := runSync(r, bg, "c", Text("问题")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -237,7 +233,7 @@ func TestCompactionFollowsTheRunModel(t *testing.T) {
 	other.Model.MaxInputTokens = 1000
 	r, _ := newRunner(t, base)
 	for _, q := range []string{"问题一", "问题二", "问题三"} {
-		if _, err := r.Run(bg, "c", Text(long(q)), WithModel(other)); err != nil {
+		if _, err := runSync(r, bg, "c", Text(long(q)), WithModel(other)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -283,12 +279,12 @@ func TestCustomCompactorAndDisable(t *testing.T) {
 		return &CompactResult{Summary: "x", FirstKeptID: "不存在"}, nil
 	}}
 	h, _ = newRunner(t, client, with(bad))
-	if _, err := h.Run(bg, "c", Text("问")); err == nil || !strings.Contains(err.Error(), "FirstKeptID") {
+	if _, err := runSync(h, bg, "c", Text("问")); err == nil || !strings.Contains(err.Error(), "FirstKeptID") {
 		t.Fatalf("an invalid kept start should fail: %v", err)
 	}
 	failing := &fixedCompactor{result: func(CompactInput) (*CompactResult, error) { return nil, errors.New("摘要服务不可用") }}
 	h, _ = newRunner(t, client, with(failing))
-	if _, err := h.Run(bg, "c", Text("问")); err == nil {
+	if _, err := runSync(h, bg, "c", Text("问")); err == nil {
 		t.Fatal("a strategy error should stop the run")
 	}
 

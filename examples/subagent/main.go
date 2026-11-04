@@ -45,7 +45,11 @@ func main() {
 	ctx, sessionID := context.Background(), "demo-session"
 	input := runner.Text("Give me one strength and one weakness each of Go and Rust for writing web services. Research each language with its own sub-agent.")
 	for {
-		result, err := r.Run(ctx, sessionID, input)
+		run, err := r.Start(ctx, sessionID, input)
+		if err != nil {
+			log.Fatal(err)
+		}
+		result, err := run.Wait(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -1,5 +1,5 @@
 // Package runner is the Agent runtime: it loads history by session ID, builds the context of each run, drives the Agent,
-// persists messages, manages queued messages and history compaction, and hands the events of a run to its caller.
+// persists messages, manages queued messages and history compaction, and runs in the background with events any number of receivers can follow.
 //
 // A Runner holds one Agent and one store and serves any number of sessions: different sessions can run concurrently,
 // and each session has at most one run at a time. That guarantee only holds within one Runner instance: when several processes or
@@ -56,12 +56,12 @@ type Config struct {
 	// OnTaskStarted is called after a task starts running, exactly once per task and before the other callbacks.
 	OnTaskStarted func(ctx context.Context, task tool.Task)
 	// OnTaskProgressed is called every time a task reports progress, for live display. task is the snapshot with the progress merged;
-	// for a sub-agent, update.Event is the Event of the run on the child session, the same as Stream hands to its caller,
+	// for a sub-agent, update.Event is the Event of the run on the child session, the same as Run.Events hands out,
 	// and for a background command update.Output is the new output.
 	OnTaskProgressed func(ctx context.Context, task tool.Task, update tool.TaskUpdate)
 	// OnTaskFinished is called after a task ends and its result has been sent back to the session that spawned it, exactly once per task and last.
 	// When delivery is ResultSavedToHistory the main Agent has not seen the result yet, and the business layer decides whether to wake it,
-	// for example with r.Stream(ctx, task.SessionID, Input{}).
+	// for example with r.Start(ctx, task.SessionID, Input{}).
 	OnTaskFinished func(ctx context.Context, task tool.Task, delivery TaskResultDelivery)
 }
 
@@ -89,18 +89,36 @@ type Runner struct {
 	onTaskFinished   func(context.Context, tool.Task, TaskResultDelivery)
 
 	mu     sync.Mutex
-	active map[string]*runHandle
+	active map[string]*Run
+	// waiters are the Subscribe calls waiting for the next run of an idle session, keyed by session ID.
+	waiters map[string]*waiter
 	// tasks are the background tasks spawned by sessions on this Runner whose results have not been delivered, keyed by task ID.
 	tasks map[string]*task
 }
 
-// runHandle is the handle for operating a run from outside: Steer, FollowUp, Abort and Wait use it from other goroutines
-// to add messages, cancel, or wait for the end. It is registered in Runner.active, and all its fields are guarded by Runner.mu.
-// The run's own state is in runState.
-type runHandle struct {
-	runID  string
-	cancel context.CancelFunc
-	done   chan struct{}
+// Run is a run started by Start. It runs in the background whether or not anyone watches it: Events replays its events from the start
+// to any number of receivers, and Wait waits for its result. Steer, FollowUp and Abort operate on a session's current run by session ID.
+//
+// A session is also occupied by manual compaction and by writing a background task result to history; those occupations are Runs
+// without events. All fields are guarded by Runner.mu; the state private to the run's goroutine is in runState.
+type Run struct {
+	r         *Runner
+	id        string
+	sessionID string
+	cancel    context.CancelFunc
+	done      chan struct{}
+
+	// events are every event of the run so far. Earlier message_update events have their message snapshots dropped
+	// (see record), so the log grows with the deltas rather than with a full snapshot per delta.
+	events []Event
+	// lastUpdate is the index in events of the latest message_update that still carries its snapshot, -1 for none.
+	lastUpdate int
+	// wake is closed and replaced whenever events grow or the run finishes, waking Events receivers.
+	wake     chan struct{}
+	finished bool
+	// result and err are set before done is closed.
+	result *Result
+	err    error
 
 	steer    []session.Message
 	followUp []session.Message
@@ -145,8 +163,9 @@ func New(cfg Config) (*Runner, error) {
 		onTaskProgressed: cfg.OnTaskProgressed,
 		onTaskFinished:   cfg.OnTaskFinished,
 
-		active: make(map[string]*runHandle),
-		tasks:  make(map[string]*task),
+		active:  make(map[string]*Run),
+		waiters: make(map[string]*waiter),
+		tasks:   make(map[string]*task),
 	}, nil
 }
 
@@ -168,26 +187,38 @@ func (r *Runner) Running(sessionID string) bool {
 	return r.active[sessionID] != nil
 }
 
-// acquire occupies the session and registers a run handle, returning ErrBusy when the session already has a run.
-// When ending is true the handle accepts no interjections or notices from the start, for occupations that do not run the Agent (such as manual compaction).
-func (r *Runner) acquire(sessionID string, cancel context.CancelFunc, ending bool) (*runHandle, error) {
+// acquire occupies the session and registers a Run, returning ErrBusy when the session already has a run.
+// When ending is true the Run accepts no interjections or notices from the start, for occupations that do not run the Agent (such as manual compaction).
+func (r *Runner) acquire(sessionID string, cancel context.CancelFunc, ending bool) (*Run, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.active[sessionID] != nil {
 		return nil, ErrBusy
 	}
-	h := &runHandle{runID: newID("run"), cancel: cancel, done: make(chan struct{}), ending: ending}
-	r.active[sessionID] = h
-	return h, nil
+	return r.occupy(sessionID, cancel, ending), nil
 }
 
-// release frees the session: it unregisters the handle, cancels the run and wakes waiters.
-func (r *Runner) release(sessionID string, h *runHandle) {
+// occupy registers a new Run for an idle session and wakes the Subscribe calls waiting for it. The caller must hold Runner.mu.
+func (r *Runner) occupy(sessionID string, cancel context.CancelFunc, ending bool) *Run {
+	run := &Run{r: r, id: newID("run"), sessionID: sessionID, cancel: cancel, done: make(chan struct{}),
+		lastUpdate: -1, wake: make(chan struct{}), ending: ending}
+	r.active[sessionID] = run
+	if w := r.waiters[sessionID]; w != nil {
+		close(w.ch)
+		delete(r.waiters, sessionID)
+	}
+	return run
+}
+
+// release frees the session: it unregisters the Run, cancels it and wakes its waiters.
+func (r *Runner) release(sessionID string, run *Run) {
 	r.mu.Lock()
 	delete(r.active, sessionID)
+	run.finished = true
+	close(run.wake)
 	r.mu.Unlock()
-	h.cancel()
-	close(h.done)
+	run.cancel()
+	close(run.done)
 }
 
 func newID(prefix string) string {

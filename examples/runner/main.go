@@ -29,12 +29,16 @@ func main() {
 	ctx := context.Background()
 	for _, question := range []string{"My name is Ada.", "What is my name?"} {
 		fmt.Println("> " + question)
-		for event, err := range r.Stream(ctx, "demo-session", runner.Text(question)) {
-			if err != nil {
-				log.Fatal(err)
-			}
+		run, err := r.Start(ctx, "demo-session", runner.Text(question))
+		if err != nil {
+			log.Fatal(err)
+		}
+		for event := range run.Events(ctx) {
 			fmt.Print(event.TextDelta())
 		}
 		fmt.Println()
+		if _, err := run.Wait(ctx); err != nil {
+			log.Fatal(err)
+		}
 	}
 }

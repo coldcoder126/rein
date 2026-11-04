@@ -303,7 +303,7 @@ func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOpti
 		return nil, chat.Usage{}, err
 	}
 	defer r.release(sessionID, h)
-	st := &runState{r: r, handle: h, info: tool.RunInfo{SessionID: sessionID, RunID: h.runID, RootSessionID: sessionID}, model: r.model(opts.Model), result: &Result{}}
+	st := &runState{r: r, handle: h, silent: true, info: tool.RunInfo{SessionID: sessionID, RunID: h.id, RootSessionID: sessionID}, model: r.model(opts.Model), result: &Result{}}
 	summary, err := st.compact(ctx, CompactManual, opts.Instructions)
 	return summary, st.result.Usage, err
 }

@@ -28,7 +28,7 @@ func TestSkillsThroughToolset(t *testing.T) {
 		c.Agent.Instruction = "基础提示"
 		c.Agent.Toolsets = []tool.Toolset{skill.NewToolset(skill.FS(skills, "."))}
 	})
-	if _, err := r.Run(bg, "s", Text("分析一下")); err != nil {
+	if _, err := runSync(r, bg, "s", Text("分析一下")); err != nil {
 		t.Fatal(err)
 	}
 	requests := client.Requests()
@@ -54,7 +54,7 @@ func TestSkillsThroughToolset(t *testing.T) {
 	// Without skills no catalog is appended and no skill tools are provided.
 	empty := newClient(chattest.Say("完成"))
 	r, _ = newRunner(t, empty, func(c *Config) { c.Agent.Toolsets = []tool.Toolset{skill.NewToolset(skill.Static())} })
-	if _, err := r.Run(bg, "s", Text("你好")); err != nil {
+	if _, err := runSync(r, bg, "s", Text("你好")); err != nil {
 		t.Fatal(err)
 	}
 	if req := empty.Requests()[0]; req.SystemPrompt != "" || len(req.Tools) != 1 {

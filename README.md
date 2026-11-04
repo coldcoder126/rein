@@ -16,7 +16,7 @@ rein is a Go framework for building LLM agents: the agent loop, tools, sessions 
 - **Agent loop**: parallel tool execution with timeouts and result truncation, steering and follow-up messages during a run, and a middleware chain wrapping runs, turns, model calls and tool calls.
 - **Tools**: typed tools from a parameter struct, with the schema generated for you; toolsets that provide tools per session.
 - **Sub-agents and background tasks**: delegate work to sub-agents running in the background; run shell commands in the background too.
-- **Runner**: sessions persisted through a store interface, message queues, automatic context compaction and an event stream.
+- **Runner**: sessions persisted through a store interface, background runs that any number of views can follow and rejoin, message queues, automatic context compaction, and the model chosen per run.
 - **Built-in tools**: skills, a checklist, shell, background task management, and MCP servers.
 
 ## Install
@@ -61,7 +61,7 @@ The full program is in [examples/quickstart](examples/quickstart).
 | `session` | Sessions and messages, the store interface, an in-memory store |
 | `runner` | Runtime: loads history per session, drives the Agent, persistence, queues, compaction, background tasks, events |
 
-Define tools → put them in an `agent.Agent` → hand the Agent and a store to a `runner.Runner` → call `Run` or `Stream` with a session ID. Without sessions, call `Agent.Run` directly. See [docs/architecture.md](docs/architecture.md) for the design.
+Define tools → put them in an `agent.Agent` → hand the Agent and a store to a `runner.Runner` → call `Start` with a session ID and follow the run's events. Without sessions, call `Agent.Run` directly. See [docs/architecture.md](docs/architecture.md) for the design.
 
 ## Packages
 
@@ -95,7 +95,7 @@ Run them with `ANTHROPIC_API_KEY=... go run ./examples/<name>`.
 
 rein runs agents; the product around them is yours. It does not include:
 
-- fan-out of events to many connections, or resuming a stream after a client reconnects;
+- following runs across processes, or resuming them after a restart;
 - permission and approval policies (middleware gives you the hooks);
 - sandboxes for executing commands (implement `shell.Executor`);
 - production session stores (implement `session.Store`; only an in-memory store ships);

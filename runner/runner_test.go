@@ -92,28 +92,34 @@ type outcome struct {
 	err    error
 }
 
-// stream runs one run through Stream, passing each event to on, and returns the result carried by run_end and the last error.
+// runSync starts a run and waits for its result.
+func runSync(r *Runner, ctx context.Context, sessionID string, in Input, opts ...RunOption) (*Result, error) {
+	run, err := r.Start(ctx, sessionID, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return run.Wait(ctx)
+}
+
+// stream starts a run, passes each of its events to on, and returns its result.
 func stream(r *Runner, ctx context.Context, sessionID string, in Input, on func(Event), opts ...RunOption) (*Result, error) {
-	var result *Result
-	var err error
-	for event, e := range r.Stream(ctx, sessionID, in, opts...) {
-		err = e
-		if event.Type == "" {
-			continue
-		}
-		result = event.Result
+	run, err := r.Start(ctx, sessionID, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+	for event := range run.Events(ctx) {
 		if on != nil {
 			on(event)
 		}
 	}
-	return result, err
+	return run.Wait(ctx)
 }
 
 // runAsync starts a run in the background.
 func runAsync(r *Runner, sessionID, text string) <-chan outcome {
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := r.Run(bg, sessionID, Text(text))
+		result, err := runSync(r, bg, sessionID, Text(text))
 		done <- outcome{result, err}
 	}()
 	return done
@@ -122,7 +128,7 @@ func runAsync(r *Runner, sessionID, text string) <-chan outcome {
 func TestRunPersistsMessagesAndContext(t *testing.T) {
 	client := newClient(lookupThenAnswer("AAPL 估值合理")...)
 	r, store := newRunner(t, client, func(c *Config) { c.Agent.Instruction = "你是助手" })
-	result, err := r.Run(bg, "s1", Text("这家公司便宜吗？"),
+	result, err := runSync(r, bg, "s1", Text("这家公司便宜吗？"),
 		WithContext(
 			ContextInput{Text: "当前股票：AAPL"},
 			ContextInput{Text: "用户确认：长期关注 AAPL", Kind: session.KindNormal, Scope: session.ScopePersistent},
@@ -156,7 +162,7 @@ func TestRunPersistsMessagesAndContext(t *testing.T) {
 	}
 
 	// Second run: the run-scoped context is gone, the persistent one remains.
-	if _, err := r.Run(bg, "s1", Text("继续")); err != nil {
+	if _, err := runSync(r, bg, "s1", Text("继续")); err != nil {
 		t.Fatal(err)
 	}
 	second := client.Requests()[2].Messages
@@ -171,11 +177,11 @@ func TestSessionsAreIsolatedAndRunConcurrently(t *testing.T) {
 	first := runAsync(r, "甲", "甲的问题")
 	<-client.started
 
-	if _, err := r.Run(bg, "甲", Text("同一会话的第二个请求")); !errors.Is(err, ErrBusy) {
+	if _, err := runSync(r, bg, "甲", Text("同一会话的第二个请求")); !errors.Is(err, ErrBusy) {
 		t.Fatalf("a session should have only one run at a time: %v", err)
 	}
 	// Another session is unaffected and can finish while the first is still running.
-	if result, err := r.Run(bg, "乙", Text("乙的问题")); err != nil || result.Final.Text() != "回答乙" {
+	if result, err := runSync(r, bg, "乙", Text("乙的问题")); err != nil || result.Final.Text() != "回答乙" {
 		t.Fatalf("different sessions should run concurrently: %+v %v", result, err)
 	}
 	if !r.Running("甲") || r.Running("乙") {
@@ -189,7 +195,7 @@ func TestSessionsAreIsolatedAndRunConcurrently(t *testing.T) {
 		t.Fatalf("session histories should be independent: %+v %+v", a, b)
 	}
 
-	auto, err := r.Run(bg, "", Text("没有指定会话"))
+	auto, err := runSync(r, bg, "", Text("没有指定会话"))
 	if err != nil || !strings.HasPrefix(auto.SessionID, "session_") || len(saved(t, store, auto.SessionID)) != 2 {
 		t.Fatalf("an empty session ID should be generated: %+v %v", auto, err)
 	}
@@ -310,7 +316,7 @@ func TestModelFailureIsReportedAndExcludedFromReplay(t *testing.T) {
 		chattest.Say("恢复了"),
 	)
 	r, store := newRunner(t, client)
-	result, err := r.Run(bg, "s", Text("第一问"))
+	result, err := runSync(r, bg, "s", Text("第一问"))
 	var ce *chat.Error
 	if !errors.As(err, &ce) || ce.Kind != chat.KindServer || result.Status != agent.StatusFailed {
 		t.Fatalf("a model failure should return a *chat.Error: %v %s", err, result.Status)
@@ -319,7 +325,7 @@ func TestModelFailureIsReportedAndExcludedFromReplay(t *testing.T) {
 	if last.ChatMessage.StopReason != chat.StopReasonError || last.Text() != "半截" {
 		t.Fatalf("the failed assistant message should be stored with the content generated so far: %+v", last)
 	}
-	if _, err := r.Run(bg, "s", Text("第二问")); err != nil {
+	if _, err := runSync(r, bg, "s", Text("第二问")); err != nil {
 		t.Fatal(err)
 	}
 	// The Runner passes error-marked history messages through unchanged; providers remove them with NormalizeForModel.
@@ -332,11 +338,11 @@ func TestModelFailureIsReportedAndExcludedFromReplay(t *testing.T) {
 
 func TestStoreFailureEndsRunAsFailed(t *testing.T) {
 	r, _ := newRunner(t, newClient(chattest.Say("不应到达")), func(c *Config) { c.Store = failingStore{session.NewMemoryStore()} })
-	result, err := r.Run(bg, "s", Text("开始"))
+	result, err := runSync(r, bg, "s", Text("开始"))
 	if err == nil || result.Status != agent.StatusFailed {
 		t.Fatalf("a store failure should return an error and be marked failed: %+v %v", result, err)
 	}
-	if _, err := r.Run(bg, "s", Text("再来")); errors.Is(err, ErrBusy) {
+	if _, err := runSync(r, bg, "s", Text("再来")); errors.Is(err, ErrBusy) {
 		t.Fatal("the session should be idle again after the failure")
 	}
 }
@@ -347,7 +353,7 @@ func TestAbortedMessageIsSavedByStoreThatHonorsContext(t *testing.T) {
 	r, _ := newRunner(t, client, func(c *Config) { c.Store = store })
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := r.Run(bg, "s", Text("开始"))
+		result, err := runSync(r, bg, "s", Text("开始"))
 		done <- outcome{result, err}
 	}()
 	<-client.started
@@ -389,11 +395,11 @@ func TestRunWithImage(t *testing.T) {
 	}
 	client := newClient(chattest.Say("看到了"), chattest.Say("收到"))
 	r, store := newRunner(t, client)
-	if _, err := r.Run(bg, "s", Parts(chat.Text("这是什么"), chat.Media(buf.Bytes()), chat.MediaURL("https://example.com/files/report.pdf?sig=1"))); err != nil {
+	if _, err := runSync(r, bg, "s", Parts(chat.Text("这是什么"), chat.Media(buf.Bytes()), chat.MediaURL("https://example.com/files/report.pdf?sig=1"))); err != nil {
 		t.Fatal(err)
 	}
 	// Types are not restricted: undetectable content and URLs without an extension are passed through as is.
-	if _, err := r.Run(bg, "any", Parts(chat.Media([]byte{0, 1, 2, 3}), chat.MediaURL("https://example.com/download?id=1"))); err != nil {
+	if _, err := runSync(r, bg, "any", Parts(chat.Media([]byte{0, 1, 2, 3}), chat.MediaURL("https://example.com/download?id=1"))); err != nil {
 		t.Fatalf("the framework should not reject media by type: %v", err)
 	}
 	if any := client.Requests()[1].Messages[0].Content; len(any) != 2 || any[0].MIMEType != "application/octet-stream" || any[1].URL == "" {
@@ -413,12 +419,12 @@ func TestRunWithImage(t *testing.T) {
 		"neither data nor URL": Parts(chat.ContentBlock{Type: chat.ContentTypeMedia, MIMEType: "image/png"}),
 		"forged tool call":     Parts(chat.ContentBlock{Type: chat.ContentTypeToolCall, ToolCall: &chat.ToolCall{ID: "x", Name: "lookup"}}),
 	} {
-		if _, err := r.Run(bg, "s", in); err == nil {
+		if _, err := runSync(r, bg, "s", in); err == nil {
 			t.Fatalf("%s: should fail before storing", name)
 		}
 	}
 	before = saved(t, store, "s")
-	if _, err := r.Run(bg, "s", Input{}); err == nil {
+	if _, err := runSync(r, bg, "s", Input{}); err == nil {
 		t.Fatal("empty input should fail")
 	}
 	if len(saved(t, store, "s")) != len(before) {
@@ -426,7 +432,7 @@ func TestRunWithImage(t *testing.T) {
 	}
 }
 
-func TestStreamYieldsEventsInOrder(t *testing.T) {
+func TestEventsComeInOrder(t *testing.T) {
 	client := newClient(lookupThenAnswer("完成")...)
 	r, _ := newRunner(t, client)
 	var order []string
@@ -451,15 +457,13 @@ func TestStreamYieldsEventsInOrder(t *testing.T) {
 	}
 }
 
-func TestStreamReportsStartFailureAndRunError(t *testing.T) {
+func TestStartFailsAtOnceWhenBusyAndWaitReportsRunError(t *testing.T) {
 	client := newGatedClient(chattest.Say("回答"), chattest.Fail(&chat.Error{Kind: chat.KindServer, Message: "过载"}))
 	r, _ := newRunner(t, client)
 	done := runAsync(r, "s", "开始")
 	<-client.started
-	var events []Event
-	_, err := stream(r, bg, "s", Text("挤进来"), func(event Event) { events = append(events, event) })
-	if !errors.Is(err, ErrBusy) || len(events) != 0 {
-		t.Fatalf("a run that could not start should only give an error: %v %+v", err, events)
+	if run, err := r.Start(bg, "s", Text("挤进来")); !errors.Is(err, ErrBusy) || run != nil {
+		t.Fatalf("Start should fail at once while the session is busy: %v", err)
 	}
 	close(client.release)
 	<-done
@@ -467,30 +471,117 @@ func TestStreamReportsStartFailureAndRunError(t *testing.T) {
 	result, err := stream(r, bg, "s", Text("再来"), nil)
 	var ce *chat.Error
 	if !errors.As(err, &ce) || result == nil || result.Status != agent.StatusFailed {
-		t.Fatalf("when the run fails the last iteration should give both run_end and the error: %+v %v", result, err)
+		t.Fatalf("Wait should give both the result and the error of a failed run: %+v %v", result, err)
 	}
 }
 
-func TestStreamStopsRunWhenConsumerBreaks(t *testing.T) {
-	client := newClient(lookupThenAnswer("不应到达")...)
+func TestRunOutlivesItsCallerAndStopsOnAbort(t *testing.T) {
+	client := newGatedClient(lookupThenAnswer("完成")...)
 	r, store := newRunner(t, client)
-	for event := range r.Stream(bg, "s", Text("开始")) {
-		if event.Type == EventAgentEvent && event.AgentEvent.Type == agent.EventToolExecutionEnd {
-			break
+	ctx, cancel := context.WithCancel(bg)
+	run, err := r.Start(ctx, "s", Text("开始"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-client.started
+	cancel() // the caller goes away, the run goes on
+	close(client.release)
+	result, err := run.Wait(bg)
+	if err != nil || result.Final.Text() != "完成" || result.SessionID != run.SessionID() || result.RunID != run.ID() {
+		t.Fatalf("the run should finish after its caller's ctx is canceled: %+v %v", result, err)
+	}
+	if got := sessionRoles(saved(t, store, "s")); got != "user,assistant,tool,assistant" {
+		t.Fatalf("every message of the run should be stored: %s", got)
+	}
+
+	gated := newGatedClient(chattest.Say("不应到达"))
+	r, _ = newRunner(t, gated)
+	run, _ = r.Start(bg, "s", Text("开始"))
+	<-gated.started
+	r.Abort("s")
+	result, err = run.Wait(bg)
+	if !errors.Is(err, context.Canceled) || result.Status != agent.StatusAborted || r.Running("s") {
+		t.Fatalf("Abort should stop the run, and the session should be free once Wait returns: %+v %v", result, err)
+	}
+}
+
+func TestEventsAndSubscribeReplayToEveryReceiver(t *testing.T) {
+	reply := func(_ context.Context, b *chat.Builder) {
+		b.TextDelta("你")
+		b.TextDelta("好")
+		b.Done(chat.StopReasonStop)
+	}
+	client := newGatedClient(reply, chattest.Say("再见"))
+	r, _ := newRunner(t, client)
+	run, err := r.Start(bg, "s", Text("开始"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-client.started
+	// A view attaching mid-run gets the run from its start, then the later runs of the session.
+	ctx, cancel := context.WithCancel(bg)
+	followed := make(chan Event, 100)
+	go func() {
+		for event := range r.Subscribe(ctx, "s") {
+			followed <- event
+		}
+		close(followed)
+	}()
+	attached := <-followed // make sure the view attached before the run ends
+	close(client.release)
+
+	var live, replayed []Event
+	for event := range run.Events(bg) {
+		live = append(live, event)
+	}
+	for event := range run.Events(bg) {
+		replayed = append(replayed, event)
+	}
+	if len(live) == 0 || len(replayed) != len(live) || replayed[0].Type != EventRunStart || replayed[len(replayed)-1].Type != EventRunEnd {
+		t.Fatalf("every receiver should get the whole run: live=%d replayed=%d", len(live), len(replayed))
+	}
+	var text string
+	var updates, snapshots int
+	for _, event := range replayed {
+		text += event.TextDelta()
+		if ae := event.AgentEvent; ae != nil && ae.Type == agent.EventMessageUpdate {
+			updates++
+			if ae.Message != nil {
+				snapshots++
+			}
 		}
 	}
-	if r.Running("s") {
-		t.Fatal("the run should have ended after iteration stopped")
+	if text != "你好" || updates < 2 || snapshots != 1 {
+		t.Fatalf("a replay should keep every delta and only the latest snapshot: %q updates=%d snapshots=%d", text, updates, snapshots)
 	}
-	if len(client.Requests()) != 1 {
-		t.Fatalf("the model should not be called after iteration stopped: %d", len(client.Requests()))
+
+	next := func(events ...Event) []Event {
+		for event := range followed {
+			events = append(events, event)
+			if event.Type == EventRunEnd {
+				break
+			}
+		}
+		return events
 	}
-	if got := sessionRoles(saved(t, store, "s")); got != "user,assistant,tool" {
-		t.Fatalf("messages completed before stopping should be stored: %s", got)
+	if first := next(attached); len(first) != len(live) || first[0].RunID != run.ID() {
+		t.Fatalf("Subscribe should replay the run in progress from its start: %d events", len(first))
 	}
-	// The scripts are used up, so this run fails; it only checks that the session is not occupied.
-	if _, err := r.Run(bg, "s", Text("继续")); errors.Is(err, ErrBusy) {
-		t.Fatal("the session should not still be occupied")
+	second, err := stream(r, bg, "s", Text("再来"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events := next(); len(events) == 0 || events[0].Type != EventRunStart || events[0].RunID != second.RunID {
+		t.Fatalf("Subscribe should follow the next run of the session: %+v", events)
+	}
+	cancel()
+	for range followed {
+	}
+	r.mu.Lock()
+	waiting := len(r.waiters)
+	r.mu.Unlock()
+	if waiting != 0 {
+		t.Fatalf("a canceled Subscribe should stop waiting: %d", waiting)
 	}
 }
 
@@ -550,7 +641,7 @@ func TestQueuedMessagesMustConvertToUserMessages(t *testing.T) {
 	}
 }
 
-func TestStreamTextDelta(t *testing.T) {
+func TestEventTextDelta(t *testing.T) {
 	r, _ := newRunner(t, newClient(chattest.Say("你好")))
 	var text string
 	if _, err := stream(r, bg, "s", Text("hi"), func(event Event) { text += event.TextDelta() + event.ThinkingDelta() }); err != nil {
@@ -655,7 +746,7 @@ func TestSubAgentRunsInBackground(t *testing.T) {
 	r, store := newSubAgentRunner(t, mainClient, workerClient, rec)
 
 	// The tool returns immediately: when the main run ends, the sub-task is still stuck in its first model call.
-	result, err := r.Run(bg, "parent", Text("开始"))
+	result, err := runSync(r, bg, "parent", Text("开始"))
 	if err != nil || result.Final.Text() != "已经开始了" {
 		t.Fatalf("the main run should not wait for the sub-task: %+v %v", result, err)
 	}
@@ -707,14 +798,14 @@ func TestSubAgentRunsInBackground(t *testing.T) {
 	}
 
 	// Empty input continues from history: the main Agent handles the result written to history.
-	result, err = r.Run(bg, "parent", Input{})
+	result, err = runSync(r, bg, "parent", Input{})
 	if err != nil || result.Final.Text() != "结果是工具结果" {
 		t.Fatalf("empty input should continue the run from history: %+v %v", result, err)
 	}
 	if msgs := mainClient.Requests()[2].Messages; !strings.Contains(msgs[len(msgs)-1].TextContent(), "<task_result") {
 		t.Fatalf("the woken model should see the result notice: %+v", msgs[len(msgs)-1])
 	}
-	if _, err := r.Run(bg, "parent", Input{}); err == nil {
+	if _, err := runSync(r, bg, "parent", Input{}); err == nil {
 		t.Fatal("empty input should fail when history ends with an assistant message")
 	}
 }
@@ -727,7 +818,7 @@ func TestGeneralSubAgentUsesTheRunModel(t *testing.T) {
 		c.Agent.Tools = append(c.Agent.Tools, agent.SubAgentTool(agent.SubAgentConfig{}), tasktool.Tool())
 		rec.install(c)
 	})
-	if _, err := r.Run(bg, "p", Text("开始"), WithModel(other)); err != nil {
+	if _, err := runSync(r, bg, "p", Text("开始"), WithModel(other)); err != nil {
 		t.Fatal(err)
 	}
 	if f := rec.wait(t); f.task.Status != tool.TaskCompleted || len(other.Requests()) != 3 || len(base.Requests()) != 0 {
@@ -758,7 +849,7 @@ func TestEnvironmentMiddlewaresApplyToSubAgents(t *testing.T) {
 		c.Middlewares = []agent.Middleware{record("env")}
 		rec.install(c)
 	})
-	if _, err := r.Run(bg, "s", Text("开始")); err != nil {
+	if _, err := runSync(r, bg, "s", Text("开始")); err != nil {
 		t.Fatal(err)
 	}
 	if f := rec.wait(t); f.task.Status != tool.TaskCompleted {
@@ -785,7 +876,7 @@ func TestSubAgentResultIsInjectedIntoRunningRun(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.Run(bg, "parent", Text("开始"))
+		_, err := runSync(r, bg, "parent", Text("开始"))
 		done <- err
 	}()
 	<-mainStarted
@@ -828,7 +919,7 @@ func TestSubAgentOutlivesAbortAndCanBeStopped(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.Run(bg, "parent", Text("开始"))
+		_, err := runSync(r, bg, "parent", Text("开始"))
 		done <- err
 	}()
 	<-mainStarted
@@ -885,7 +976,7 @@ func TestTaskToolStatusAndStop(t *testing.T) {
 	r, _ = newSubAgentRunner(t, mainClient, workerClient, rec)
 	r.agent.SequentialTools = true
 
-	result, err := r.Run(bg, "parent", Text("开始"))
+	result, err := runSync(r, bg, "parent", Text("开始"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +1006,7 @@ func TestFailedSubAgentIsStillRecorded(t *testing.T) {
 	})
 	rec := newTaskRecorder()
 	r, store := newSubAgentRunner(t, mainClient, workerClient, rec)
-	if _, err := r.Run(bg, "parent", Text("开始")); err != nil {
+	if _, err := runSync(r, bg, "parent", Text("开始")); err != nil {
 		t.Fatal(err)
 	}
 	f := rec.wait(t)
@@ -957,7 +1048,7 @@ func TestBackgroundShellCommand(t *testing.T) {
 		c.Agent.Tools = append(c.Agent.Tools, shell.Tool(shell.Config{Executor: exec}), tasktool.Tool())
 		rec.install(c)
 	})
-	if _, err := r.Run(bg, "s", Text("构建一下")); err != nil {
+	if _, err := runSync(r, bg, "s", Text("构建一下")); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "命令开始输出", func() bool {

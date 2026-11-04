@@ -16,7 +16,7 @@ rein 是一个用 Go 构建 LLM Agent 的框架，提供 Agent 循环、工具�
 - **Agent 循环**：工具并发执行，带超时和结果截断；运行中可以插入引导消息和后续消息；中间件链可以包装运行、轮次、模型调用和工具调用。
 - **工具**：用参数结构体定义带类型的工具，schema 自动生成；工具集可以按会话提供不同的工具。
 - **子 Agent 和后台任务**：把工作交给在后台运行的子 Agent；shell 命令也可以在后台运行。
-- **Runner 运行时**：通过存储接口持久化会话，支持消息排队、自动压缩上下文和事件流。
+- **Runner 运行时**：通过存储接口持久化会话；运行在后台进行，可以被任意多个视图订阅、随时重新接入；支持消息排队、自动压缩上下文，每次运行可以选用不同的模型。
 - **内置工具**：技能（skill）、待办清单、shell、后台任务管理、MCP 服务器。
 
 ## 安装
@@ -61,7 +61,7 @@ fmt.Println(result.Final.TextContent())
 | `session` | 会话和消息、存储接口、内存存储 |
 | `runner` | 运行时：按会话加载历史、驱动 Agent、持久化、排队、压缩、后台任务、事件 |
 
-组合方式：定义工具 → 放进 `agent.Agent` → 把 Agent 和存储交给 `runner.Runner` → 用会话 ID 调用 `Run` 或 `Stream`。不需要会话时，直接调用 `Agent.Run`。设计细节见 [docs/architecture.md](docs/architecture.md)（英文）。
+组合方式：定义工具 → 放进 `agent.Agent` → 把 Agent 和存储交给 `runner.Runner` → 用会话 ID 调用 `Start`，再订阅这次运行的事件。不需要会话时，直接调用 `Agent.Run`。设计细节见 [docs/architecture.md](docs/architecture.md)（英文）。
 
 ## 包一览
 
@@ -95,7 +95,7 @@ fmt.Println(result.Final.TextContent())
 
 rein 负责运行 Agent，外围的产品由你来做。下面这些不包含在内：
 
-- 把事件推送给多个连接，或客户端重连后恢复事件流；
+- 跨进程订阅运行，或进程重启后恢复运行；
 - 权限和审批策略（中间件提供了接入点）；
 - 执行命令的沙箱（实现 `shell.Executor`）；
 - 生产环境的会话存储（实现 `session.Store`；框架只自带内存存储）；

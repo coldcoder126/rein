@@ -224,17 +224,15 @@ func (e subAgentExecutor) Start(ctx context.Context, in agent.SubAgentInput) (to
 // runSubAgent runs a sub-task on its child session. A sub-task is just an ordinary run on a Runner sharing the store,
 // so storing, replay and compaction work as in the main session; the child session records its parent. Every event is reported as progress.
 func runSubAgent(ctx context.Context, child *Runner, sessionID string, in agent.SubAgentInput, details agent.SubAgentDetails, report func(tool.TaskUpdate)) (tool.TaskResult, error) {
-	var result *Result
-	var runErr error
 	asChild := func(o *runOptions) { o.parent = &in.Parent }
-	for event, err := range child.Stream(ctx, sessionID, Text(in.Task), asChild) {
-		if event.Result != nil {
-			result = event.Result
-		}
-		runErr = err
-		if event.Type == "" {
-			continue
-		}
+	run, err := child.Start(ctx, sessionID, Text(in.Task), asChild)
+	if err != nil {
+		return tool.TaskResult{Details: details}, err
+	}
+	// The run does not follow ctx on its own: stopping the task aborts it, and the events are still read to the end.
+	defer context.AfterFunc(ctx, func() { child.Abort(sessionID) })()
+	ctx = context.WithoutCancel(ctx)
+	for event := range run.Events(ctx) {
 		if ae := event.AgentEvent; ae != nil {
 			switch ae.Type {
 			case agent.EventTurnStart:
@@ -249,6 +247,7 @@ func runSubAgent(ctx context.Context, child *Runner, sessionID string, in agent.
 		}
 		report(tool.TaskUpdate{Details: details, Event: event})
 	}
+	result, runErr := run.Wait(ctx)
 	// The sub-task's final reply is its result; when it did not complete normally, it is the last output before the interruption.
 	var out tool.TaskResult
 	if result != nil {
@@ -273,8 +272,7 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 		switch {
 		case h == nil:
 			// While it is occupied new runs get ErrBusy, and other senders wait for it to be released.
-			hold := &runHandle{cancel: func() {}, done: make(chan struct{}), ending: true}
-			r.active[sessionID] = hold
+			hold := r.occupy(sessionID, func() {}, true)
 			r.mu.Unlock()
 			err := r.store.AppendMessages(context.WithoutCancel(ctx), sessionID, msg)
 			r.release(sessionID, hold)
@@ -298,7 +296,7 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 
 // notifyDelivered tells waiting tasks that their results have been delivered. The caller must hold Runner.mu.
 // When messages is empty, every task still waiting is told.
-func (h *runHandle) notifyDelivered(delivery TaskResultDelivery, messages []session.Message) {
+func (h *Run) notifyDelivered(delivery TaskResultDelivery, messages []session.Message) {
 	if messages == nil {
 		for id, ch := range h.delivered {
 			ch <- delivery

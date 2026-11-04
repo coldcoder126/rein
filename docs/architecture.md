@@ -11,7 +11,7 @@ rein is an agent framework for Go. A model by itself is just a function from tex
 | `session` | Persistence model of sessions and messages, store interface, in-memory store | `chat` |
 | `runner` | Runtime: loads history per session, drives the Agent, persistence, queues, compaction, events | `agent`, `session` |
 
-Putting it together: define some tools and toolsets → put them in an `agent.Agent` → hand the Agent and a store to a `runner.Runner` → call `Run` with a session ID. Without sessions you can call `Agent.Run` directly.
+Putting it together: define some tools and toolsets → put them in an `agent.Agent` → hand the Agent and a store to a `runner.Runner` → call `Start` with a session ID. Without sessions you can call `Agent.Run` directly.
 
 ## chat
 
@@ -130,7 +130,7 @@ A run (one call to `Agent.Run`) is a two-level loop. One iteration of the inner 
 
 `Result.Status` gives the reason the run ended: `completed`, `max_turns`, `failed` or `aborted`. Every ending emits `agent_end`.
 
-The error contract is the same for `Agent.Run`, `agent.RunJSON` and `Runner.Run`: `error` is nil only on normal completion; a model failure returns a classified `*chat.Error`, cancellation returns the ctx error, and the turn limit returns `ErrMaxTurnsExceeded`, and in these cases `Result` is still valid.
+The error contract is the same for `Agent.Run`, `agent.RunJSON` and `runner.Run.Wait`: `error` is nil only on normal completion; a model failure returns a classified `*chat.Error`, cancellation returns the ctx error, and the turn limit returns `ErrMaxTurnsExceeded`, and in these cases `Result` is still valid.
 
 - A failed assistant message is included in the result, and `Final` keeps the error and the content generated so far. `MaxTurns` defaults to 20.
 - Invalid input, or a failing toolset, middleware or event handler, also returns an `error`, in which case `Result` may be nil.
@@ -245,16 +245,15 @@ A `Runner` holds one Agent and one store and serves any number of sessions: diff
 ### Runs
 
 - `Config.Middlewares` are the runtime middlewares; see "Middleware" under agent. Sub-tasks of spawned sub-agents use the same set.
-- `Run(ctx, sessionID, input)`: processes one user input, creating the session if needed. One `Run` drives exactly one Agent run to the end and returns the result.
-- `Stream`: does the same and returns an iterable sequence of events, for streaming display.
+- `Start(ctx, sessionID, input)`: processes one user input, creating the session if needed, and returns a `*Run` as soon as the run has started; a busy session gets `ErrBusy` at once. One run drives exactly one Agent run to the end in the background: it keeps the values of `ctx` but not its cancellation, so it does not depend on anyone watching it. `Run.Wait` returns its result.
 - `Steer`: interjects mid-run, injected after the current turn's tools finish and before the next model call.
 - `FollowUp`: queues a follow-up task, injected when the model gives its final reply and the run would end.
-- `Abort`: cancels the session's current run and returns the queued messages not yet injected. `Running` reports whether the session is running, and `Wait` waits for it to end.
+- `Abort`: cancels the session's current run and returns the queued messages not yet injected. `Running` reports whether the session is occupied, and `Runner.Wait` waits for that to end, which only needs the session ID (for example to start again right after stopping).
 - The input is an `Input`: content blocks that can only be text and media. Use `runner.Text` for plain text and `runner.Parts` with attachments. The content enters history as is; thinking and tool call blocks are rejected. An empty input (`Input{}`) appends nothing and continues from history, for waking the main Agent to handle background task results written to history; the history must end with a user-side message or a tool result.
 - `WithModel` runs this run on another model than `Agent.Model` (see `agent.Input.Model`); compaction during the run follows it, for the context limit and for generating the summary. So one Runner serves every model, and stopping, queues and background tasks do not depend on which model a session uses.
 - `WithContext` injects business context: by default it only enters this run and is not written to the session, which suits temporary information such as page state; with the persistent scope it is written to the session and stays visible to later runs. Source and kind follow the business layer's conventions, with no framework defaults.
 
-`Result.Status` gives the end status, and `Pending` the queued messages not injected in time. When the model fails, the run is canceled or the turn limit is reached, `Run` also returns a non-nil `error`, and `Result` is still valid.
+`Result.Status` gives the end status, and `Pending` the queued messages not injected in time. When the model fails, the run is canceled or the turn limit is reached, `Run.Wait` also returns a non-nil `error`, and `Result` is still valid.
 
 ### Background tasks
 
@@ -292,11 +291,13 @@ Long sessions run into the model's context limit. The Runner decides when and ho
 
 ### Events
 
-`Stream` hands the events of the run to its caller, and `TextDelta()` / `ThinkingDelta()` on an event give the text and thinking deltas directly: `run_start`, `message_saved`, `queue_update`, `agent_event`, `compaction`, and finally `run_end` with the run result. `message_saved` is only emitted after the message is stored; every event is sent in order by the run itself, including queue changes caused by `Steer` or `Abort` from other goroutines.
+Every event of a run is kept in memory with the `Run`, and `TextDelta()` / `ThinkingDelta()` on an event give the text and thinking deltas directly: `run_start`, `message_saved`, `queue_update`, `agent_event`, `compaction`, and finally `run_end` with the run result. `message_saved` is only emitted after the message is stored; every event is sent in order by the run itself, including queue changes caused by `Steer` or `Abort` from other goroutines.
 
-The run follows the caller: it continues only after an event is taken, and stops when iteration stops or `ctx` is canceled. An error appears at most once, in the last iteration; when the run cannot start (for example the session is busy) there is only the error and no events.
+- `Run.Events` replays the run's events from its start and then hands over new ones until `run_end`. Any number of receivers can iterate at their own pace, and none of them holds up the run.
+- `Runner.Subscribe(ctx, sessionID)` follows a session rather than one run: it replays the run in progress, then continues with every later run until `ctx` ends, so a reopened page or a second tab can attach at any time, including to runs started elsewhere (a bot, a woken Agent). Earlier runs are read from the store.
+- To bound memory, a replayed `message_update` keeps only its delta once a newer one exists; `message_end` carries the complete message.
 
-The Runner only hands events to the caller. Fanning events out to several connections, keeping a run going after a client disconnects, and restoring the display after a page refresh belong to the business layer: iterate `Stream` in your own goroutine and forward the events, and read stored history from the store.
+Events live in the process that runs them: following a run from another instance, or after a restart, belongs to the business layer.
 
 Not implemented yet: session trees, JSONL storage, session-level key-value state, and pausing and resuming across processes.
 

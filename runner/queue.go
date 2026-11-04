@@ -9,13 +9,13 @@ import (
 // Steer interjects mid-run: the message is injected after the current turn's tools finish and before the next model call,
 // to correct or add to the task in progress. It never interrupts tools that are executing. It returns ErrNotRunning when the session is not running.
 func (r *Runner) Steer(sessionID string, in Input) error {
-	return r.enqueue(sessionID, in, func(h *runHandle) *[]session.Message { return &h.steer })
+	return r.enqueue(sessionID, in, func(h *Run) *[]session.Message { return &h.steer })
 }
 
 // FollowUp queues a follow-up message, injected when the model gives its final reply and the run would end; the current task is not affected.
 // It returns ErrNotRunning when the session is not running.
 func (r *Runner) FollowUp(sessionID string, in Input) error {
-	return r.enqueue(sessionID, in, func(h *runHandle) *[]session.Message { return &h.followUp })
+	return r.enqueue(sessionID, in, func(h *Run) *[]session.Message { return &h.followUp })
 }
 
 // Abort cancels the session's current run and returns the queued messages not yet injected (they do not enter history). It returns an empty queue when idle.
@@ -48,7 +48,7 @@ func (r *Runner) Wait(ctx context.Context, sessionID string) error {
 	}
 }
 
-func (r *Runner) enqueue(sessionID string, in Input, queue func(*runHandle) *[]session.Message) error {
+func (r *Runner) enqueue(sessionID string, in Input, queue func(*Run) *[]session.Message) error {
 	content, err := in.blocks()
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (r *Runner) enqueue(sessionID string, in Input, queue func(*runHandle) *[]s
 }
 
 // drainQueues takes every message from both queues; the caller must hold Runner.mu.
-func (h *runHandle) drainQueues() Queue {
+func (h *Run) drainQueues() Queue {
 	q := Queue{Steer: h.steer, FollowUp: h.followUp}
 	h.steer, h.followUp = nil, nil
 	return q
