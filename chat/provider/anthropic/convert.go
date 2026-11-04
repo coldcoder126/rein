@@ -247,32 +247,23 @@ func toolResultBlock(m chat.Message) (goanthropic.ContentBlockParamUnion, error)
 // mediaBlock converts a media block into an Anthropic image or document block, exactly one of which is non-nil: uploaded files
 // are referred to by ID, images and PDFs support inline data and URLs, text files become plain text documents (inline only). Media the Messages API has no input for returns an error and the caller decides what to do.
 func mediaBlock(block chat.ContentBlock) (*goanthropic.ImageBlockParam, *goanthropic.DocumentBlockParam, error) {
-	if block.File != nil {
-		// NormalizeForModel keeps a file only when this endpoint can read it; the Files API checks the type itself.
-		if block.IsImage() {
-			image := &goanthropic.ImageBlockParam{}
-			image.Source.OfFile = &goanthropic.FileImageSourceParam{FileID: block.File.ID}
-			return image, nil, nil
-		}
-		document := &goanthropic.DocumentBlockParam{}
-		if block.Name != "" {
-			document.Title = goanthropic.String(block.Name)
-		}
-		document.Source.OfFile = &goanthropic.FileDocumentSourceParam{FileID: block.File.ID}
-		return nil, document, nil
-	}
+	// NormalizeForModel keeps a file only when this endpoint can read it; the Files API checks the type itself.
+	file := block.File != nil
 	inline := len(block.Data) > 0
-	if !inline && block.URL == "" {
-		return nil, nil, &chat.Error{Kind: chat.KindInvalidRequest, Message: "anthropic: media block has neither data nor URL"}
+	if !file && !inline && block.URL == "" {
+		return nil, nil, &chat.Error{Kind: chat.KindInvalidRequest, Message: "anthropic: media block has neither a file, data nor URL"}
 	}
 	if block.IsImage() {
 		image := &goanthropic.ImageBlockParam{}
-		if inline {
+		switch {
+		case file:
+			image.Source.OfFile = &goanthropic.FileImageSourceParam{FileID: block.File.ID}
+		case inline:
 			image.Source.OfBase64 = &goanthropic.Base64ImageSourceParam{
 				Data:      base64.StdEncoding.EncodeToString(block.Data),
 				MediaType: goanthropic.Base64ImageSourceMediaType(block.MIMEType),
 			}
-		} else {
+		default:
 			image.Source.OfURL = &goanthropic.URLImageSourceParam{URL: block.URL}
 		}
 		return image, nil, nil
@@ -282,6 +273,8 @@ func mediaBlock(block chat.ContentBlock) (*goanthropic.ImageBlockParam, *goanthr
 		document.Title = goanthropic.String(block.Name)
 	}
 	switch {
+	case file:
+		document.Source.OfFile = &goanthropic.FileDocumentSourceParam{FileID: block.File.ID}
 	case block.MIMEType == "application/pdf" && inline:
 		document.Source.OfBase64 = &goanthropic.Base64PDFSourceParam{Data: base64.StdEncoding.EncodeToString(block.Data)}
 	case block.MIMEType == "application/pdf":

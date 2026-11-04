@@ -143,7 +143,11 @@ const fileExpiryMargin = 5 * time.Minute
 // to the block's data or URL, or, with neither, to a note.
 func resolveFile(b ContentBlock, scope string, now time.Time) ContentBlock {
 	f := b.File
-	if f == nil || (f.Scope != "" && f.Scope == scope && (f.ExpiresAt.IsZero() || now.Add(fileExpiryMargin).Before(f.ExpiresAt))) {
+	if f == nil {
+		return b
+	}
+	usable := f.Scope != "" && f.Scope == scope && (f.ExpiresAt.IsZero() || now.Add(fileExpiryMargin).Before(f.ExpiresAt))
+	if usable {
 		return b
 	}
 	b.File = nil

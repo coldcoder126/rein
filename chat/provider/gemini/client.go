@@ -98,12 +98,18 @@ func (c *Client) resolveModel(req chat.Request) string {
 	return c.cfg.Model
 }
 
+// modelInfo returns the info of the model actually used by this request, for deciding on replay whether it is the same model.
+func (c *Client) modelInfo(req chat.Request) chat.ModelInfo {
+	info := c.Info()
+	info.Model = c.resolveModel(req)
+	return info
+}
+
 // Stream sends a streaming request.
 func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
 	return func(yield func(chat.Event) bool) {
-		model := c.resolveModel(req)
-		info := c.Info()
-		info.Model = model
+		info := c.modelInfo(req)
+		model := info.Model
 		b := chat.NewBuilder(yield, info)
 
 		client, err := c.newSDKClient(ctx)

@@ -114,9 +114,7 @@ func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.Genera
 		}
 	}
 
-	target := c.Info()
-	target.Model = model
-	contents, err := convertMessages(chat.NormalizeForModel(req.Messages, target), !usesThinkingBudget(model))
+	contents, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)), !usesThinkingBudget(model))
 	if err != nil {
 		return nil, nil, err
 	}
