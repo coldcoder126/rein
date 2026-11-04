@@ -29,7 +29,11 @@ func (u Usage) Add(other Usage) Usage {
 
 // ModelInfo describes the runtime configuration of a model.
 type ModelInfo struct {
-	Provider        string
+	// Provider is the vendor serving the model (anthropic, deepseek...), for display, usage and errors.
+	Provider string
+	// API is the protocol of the endpoint (anthropic-messages, openai-responses...). Replies keep provider-private data
+	// (signatures, item IDs) that only the same provider, API and model can replay.
+	API             string
 	Model           string
 	MaxInputTokens  int
 	MaxOutputTokens int

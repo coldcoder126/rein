@@ -139,7 +139,7 @@ func TestRequestBody(t *testing.T) {
 		Messages: []chat.Message{
 			{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")},
 				chat.MediaURL("https://example.com/clip.mp4"), chat.Media([]byte("PK\x03\x04")).WithName("表格.xlsx")}},
-			{Role: chat.RoleAssistant, Provider: providerName, Model: ModelGemini3_5Flash, Content: []chat.ContentBlock{
+			{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelGemini3_5Flash, Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "无签名的思考"},
 				call("call_1", "c2lnMQ=="), call(generatedIDPrefix+"1", ""),
 			}},

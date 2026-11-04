@@ -92,8 +92,10 @@ type Message struct {
 	IsError    bool   `json:"is_error,omitempty"`
 	Details    any    `json:"details,omitempty"`
 
-	// The following fields are only meaningful on assistant messages.
+	// The following fields are only meaningful on assistant messages. Provider is the vendor that served the reply,
+	// API the protocol it came over (see ModelInfo.API), Model the model asked for and ResponseModel the one that answered.
 	Provider      string     `json:"provider,omitempty"`
+	API           string     `json:"api,omitempty"`
 	Model         string     `json:"model,omitempty"`
 	ResponseModel string     `json:"response_model,omitempty"`
 	ResponseID    string     `json:"response_id,omitempty"`

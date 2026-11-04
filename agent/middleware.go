@@ -40,7 +40,7 @@ func BeforeModel(fn func(ctx context.Context, turn TurnInfo, req *chat.Request) 
 	return Middleware{WrapModel: func(ctx context.Context, turn TurnInfo, req chat.Request, next chat.StreamFunc) iter.Seq[chat.Event] {
 		if err := fn(ctx, turn, &req); err != nil {
 			return func(yield func(chat.Event) bool) {
-				chat.NewBuilder(yield, "", req.Model).Fail(err)
+				chat.NewBuilder(yield, chat.ModelInfo{Model: req.Model}).Fail(err)
 			}
 		}
 		return next(ctx, req)

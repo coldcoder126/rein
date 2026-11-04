@@ -106,7 +106,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 	c.mu.Unlock()
 
 	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, c.Model.Provider, c.Model.Model)
+		b := chat.NewBuilder(yield, c.Model)
 		if script != nil {
 			script(ctx, b)
 		}

@@ -12,7 +12,7 @@ import (
 
 func record(fn func(b *chat.Builder)) []chat.Event {
 	return chattest.Record(func(yield func(chat.Event) bool) {
-		fn(chat.NewBuilder(yield, "test", "m1"))
+		fn(chat.NewBuilder(yield, chat.ModelInfo{Provider: "test", Model: "m1"}))
 	})
 }
 
@@ -151,7 +151,7 @@ func TestBuilderRedactedThinking(t *testing.T) {
 func TestBuilderStopsWhenConsumerBreaks(t *testing.T) {
 	var returned []bool
 	for range func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, "test", "m1")
+		b := chat.NewBuilder(yield, chat.ModelInfo{Provider: "test", Model: "m1"})
 		returned = append(returned, b.TextDelta("a"))
 		returned = append(returned, b.TextDelta("b"))
 		returned = append(returned, b.Done(""))

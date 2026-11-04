@@ -91,8 +91,8 @@ func TestConvertAssistantKeepsBlockOrder(t *testing.T) {
 		chat.NewUserTextMessage("查"),
 		{
 			Role:     chat.RoleAssistant,
-			Provider: providerName,
-			Model:    ModelClaudeSonnet4_6,
+			Provider: providerName, API: API,
+			Model: ModelClaudeSonnet4_6,
 			Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "先想", Signature: "sig1"},
 				chat.Text("我来查"),
@@ -130,7 +130,7 @@ func TestConvertAssistantKeepsBlockOrder(t *testing.T) {
 func TestBuildParamsNormalizesReplay(t *testing.T) {
 	client := New(Config{Model: ModelClaudeHaiku4_5})
 	failed := chat.Message{
-		Role: chat.RoleAssistant, Provider: providerName, Model: ModelClaudeHaiku4_5,
+		Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelClaudeHaiku4_5,
 		Content: []chat.ContentBlock{chat.Text("半截")}, StopReason: chat.StopReasonError,
 	}
 	foreign := chat.Message{
@@ -232,7 +232,7 @@ func TestConvertMediaKinds(t *testing.T) {
 			chat.MediaURL("https://example.com/b.pdf"),
 			chat.Media([]byte("a,b\n1,2")).WithName("数据.csv"),
 		}},
-		{Role: chat.RoleAssistant, Provider: providerName, Model: client.cfg.Model, Content: []chat.ContentBlock{toolCallBlock("c1", "export", `{}`)}},
+		{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: client.cfg.Model, Content: []chat.ContentBlock{toolCallBlock("c1", "export", `{}`)}},
 		{Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{chat.Media([]byte("%PDF-1.7 报表")).WithName("报表.pdf")}},
 	}})
 	if err != nil {

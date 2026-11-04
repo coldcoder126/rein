@@ -21,6 +21,9 @@ const (
 
 	providerName = "gemini"
 
+	// API is the protocol this client speaks, see chat.ModelInfo.API.
+	API = "gemini"
+
 	defaultMaxInputTokens  = 1_048_576
 	defaultMaxOutputTokens = 65_536
 )
@@ -76,6 +79,7 @@ func New(cfg Config) *Client {
 func (c *Client) Info() chat.ModelInfo {
 	return chat.ModelInfo{
 		Provider:         providerName,
+		API:              API,
 		Model:            c.cfg.Model,
 		MaxInputTokens:   c.cfg.MaxInputTokens,
 		MaxOutputTokens:  c.cfg.MaxOutputTokens,
@@ -98,7 +102,9 @@ func (c *Client) resolveModel(req chat.Request) string {
 func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
 	return func(yield func(chat.Event) bool) {
 		model := c.resolveModel(req)
-		b := chat.NewBuilder(yield, providerName, model)
+		info := c.Info()
+		info.Model = model
+		b := chat.NewBuilder(yield, info)
 
 		client, err := c.newSDKClient(ctx)
 		if err != nil {

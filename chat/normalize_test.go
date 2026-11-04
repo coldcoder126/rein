@@ -84,6 +84,12 @@ func TestNormalizeCrossModelThinking(t *testing.T) {
 	if len(other.Content) != 2 || other.Content[0].Type != chat.ContentTypeText || other.Content[0].Text != "推理" {
 		t.Fatalf("across models thinking should become text and redacted thinking be dropped: %+v", other.Content)
 	}
+
+	otherAPI := targetModel
+	otherAPI.API = "openai-responses"
+	if got := chat.NormalizeForModel(msgs("anthropic", "claude"), otherAPI)[1]; got.Content[0].Type != chat.ContentTypeText {
+		t.Fatalf("the same provider and model over another API should not replay signatures: %+v", got.Content)
+	}
 }
 
 func TestNormalizeToolCallIDOnlyForOtherModels(t *testing.T) {

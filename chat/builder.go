@@ -30,14 +30,15 @@ type Builder struct {
 	openIndex int
 }
 
-// NewBuilder creates a Builder. provider and model are recorded on the assistant message and used to tell whether a replay goes to the same model.
-func NewBuilder(yield func(Event) bool, provider, model string) *Builder {
+// NewBuilder creates a Builder. The provider, API and model of info are recorded on the assistant message and used to tell whether a replay goes to the same model.
+func NewBuilder(yield func(Event) bool, info ModelInfo) *Builder {
 	return &Builder{
 		yield: yield,
 		msg: Message{
 			Role:      RoleAssistant,
-			Provider:  provider,
-			Model:     model,
+			Provider:  info.Provider,
+			API:       info.API,
+			Model:     info.Model,
 			CreatedAt: time.Now(),
 		},
 	}

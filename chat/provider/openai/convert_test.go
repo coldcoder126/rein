@@ -91,7 +91,7 @@ func TestReplayAssistantKeepsBlockOrderAndSignatures(t *testing.T) {
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("查"),
 		{
-			Role: chat.RoleAssistant, Provider: "openai", Model: "m1", StopReason: chat.StopReasonToolUse,
+			Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "m1", StopReason: chat.StopReasonToolUse,
 			Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "先想", Signature: reasoningItem},
 				{Type: chat.ContentTypeText, Text: "我来查", Signature: `{"v":1,"id":"msg_abc","phase":"commentary"}`},
@@ -130,7 +130,7 @@ func TestReplayCrossModelDropsPrivateSignatures(t *testing.T) {
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("查"),
 		{
-			Role: chat.RoleAssistant, Provider: "openai", Model: "other-model", StopReason: chat.StopReasonToolUse,
+			Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "other-model", StopReason: chat.StopReasonToolUse,
 			Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "旧模型的推理", Signature: `{"id":"rs_old","type":"reasoning"}`},
 				{Type: chat.ContentTypeText, Text: "我来查", Signature: `{"v":1,"id":"msg_old"}`},
@@ -158,7 +158,7 @@ func TestToolOutputWithImagesUsesContentArray(t *testing.T) {
 	image := chat.ContentBlock{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")}
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("看"),
-		{Role: chat.RoleAssistant, Provider: "openai", Model: "gpt-6-luna", StopReason: chat.StopReasonToolUse,
+		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "gpt-6-luna", StopReason: chat.StopReasonToolUse,
 			Content: []chat.ContentBlock{toolCallBlock("c1", "shot", `{}`, ""), toolCallBlock("c2", "shot", `{}`, "")}},
 		{Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{chat.Text("截图"), image}},
 		{Role: chat.RoleTool, ToolCallID: "c2", Content: []chat.ContentBlock{}},
@@ -180,7 +180,7 @@ func TestReplayDropsFailedMessagesAndReplacesUnsupportedImages(t *testing.T) {
 	client := New(Config{Model: ModelGPT6Luna, TextOnly: true})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("x")}}},
-		{Role: chat.RoleAssistant, Provider: "openai", Model: "gpt-6-luna", StopReason: chat.StopReasonError, Content: []chat.ContentBlock{chat.Text("半截")}},
+		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "gpt-6-luna", StopReason: chat.StopReasonError, Content: []chat.ContentBlock{chat.Text("半截")}},
 		chat.NewUserTextMessage("继续"),
 	}})
 	if err != nil {
@@ -211,7 +211,7 @@ func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 	client := New(Config{Model: "m1"})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("画一张"),
-		{Role: chat.RoleAssistant, Provider: "openai", Model: "m1", StopReason: chat.StopReasonToolUse,
+		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "m1", StopReason: chat.StopReasonToolUse,
 			Content: []chat.ContentBlock{image, toolCallBlock("c1", "lookup", `{}`, "")}},
 		{Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{chat.Text("结果")}},
 		chat.NewUserTextMessage("再画一张"),

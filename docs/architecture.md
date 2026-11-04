@@ -20,7 +20,7 @@ Putting it together: define some tools and toolsets → put them in an `agent.Ag
 Core boundaries:
 
 - `Client.Stream`: the single entry point for model calls, returning `iter.Seq[Event]`; `Complete` / `Collect` consume the stream into the final message.
-- `Message`: an assistant message's `Content` is an ordered list of blocks (text, thinking, tool calls) in the order the model returned them, restored unchanged on replay; it also records the provider, model, response ID and usage.
+- `Message`: an assistant message's `Content` is an ordered list of blocks (text, thinking, tool calls) in the order the model returned them, restored unchanged on replay; it also records the provider (the vendor, such as `deepseek`), the API (the protocol, such as `anthropic-messages`), the model, response ID and usage.
 - `Options`: model parameters (Model, MaxTokens, Temperature and so on) are separate from messages and passed through by the agent unchanged. `Reasoning` (off / low / medium / high / xhigh) and `CacheRetention` (none / short / long) are provider-neutral and mapped by each provider to its own API.
 - `Options.ToolChoice`: constrains tool calls (auto, none, required, a specific tool); ignored when the request has no tools.
 - `Options.Output`: requires output that follows a JSON Schema; see "Structured output" below.
@@ -67,14 +67,14 @@ Once the stream is established nothing is thrown: every failure (including cance
 
 ### Replay normalization
 
-`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, downgrades thinking blocks to text and normalizes tool call IDs across models, and replaces media the model does not accept with a note.
+`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, downgrades thinking blocks to text and normalizes tool call IDs across models (a message counts as the same model only when provider, API and model all match), and replaces media the model does not accept with a note.
 
 Real providers live in `chat/provider/*`. Each requires `Config.Model` and has no built-in default, so upgrading rein never changes the model you run; the model constants are only shorthands.
 
 - `anthropic`: the Anthropic Messages API.
 - `openai`: the OpenAI Responses API, also for endpoints compatible with it; there is no Chat Completions implementation.
 - `gemini`: built on the official `google.golang.org/genai` SDK; it uses the Gemini API by default, and the `Vertex` switch supports Vertex API keys. Full Vertex access with projects and credentials is not provided yet.
-- `deepseek`: constructors for DeepSeek; the Anthropic endpoint reuses `anthropic` and the Responses endpoint reuses `openai`.
+- `deepseek`: constructors for DeepSeek; the Anthropic endpoint reuses `anthropic` and the Responses endpoint reuses `openai`, with `Provider` set to `deepseek` so messages, usage and errors name DeepSeek while the API still tells the two endpoints apart. `anthropic` and `openai` take `Config.Provider` for other compatible endpoints too.
 
 Responses is used statelessly (`store:false`), so replay relies on block signatures: thinking blocks keep the full reasoning item (with encrypted content once `Reasoning` is on for reasoning models), text blocks keep the message id and phase, and tool call blocks keep the item id of the function_call. These signatures are only valid for the original model and are cleared across models by `NormalizeForModel`. DeepSeek's chain of thought comes as plain reasoning items that are also sent back whole; it does not recognize `store` / `include`, so the presets do not send them.
 

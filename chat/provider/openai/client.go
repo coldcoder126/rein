@@ -19,6 +19,9 @@ import (
 const (
 	providerName = "openai"
 
+	// API is the protocol this client speaks, see chat.ModelInfo.API.
+	API = "openai-responses"
+
 	ModelGPT6Luna = "gpt-6-luna"
 
 	defaultMaxInputTokens  = 128_000
@@ -30,6 +33,8 @@ type APIKeyProvider func(ctx context.Context) (string, error)
 
 // Config configures the Responses API Client.
 type Config struct {
+	// Provider names the vendor in messages, usage and errors; "openai" by default. Set it for compatible endpoints.
+	Provider        string
 	APIKey          string
 	APIKeyProvider  APIKeyProvider
 	BaseURL         string
@@ -70,6 +75,9 @@ func New(cfg Config) *Client {
 	if cfg.Model == "" {
 		panic("openai: Config.Model must not be empty")
 	}
+	if cfg.Provider == "" {
+		cfg.Provider = providerName
+	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = defaultMaxInputTokens
 	}
@@ -82,7 +90,7 @@ func New(cfg Config) *Client {
 // Stream sends a streaming request.
 func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
 	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, providerName, c.resolveModel(req))
+		b := chat.NewBuilder(yield, c.modelInfo(req))
 
 		client, err := c.newSDKClient(ctx)
 		if err != nil {
@@ -97,7 +105,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		stream := client.Responses.NewStreaming(ctx, params)
 		defer stream.Close()
 
-		state := newStreamState(b)
+		state := newStreamState(b, c.cfg.Provider)
 		for stream.Next() {
 			if !state.handle(stream.Current()) {
 				return
@@ -114,7 +122,8 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 // Info returns the model info.
 func (c *Client) Info() chat.ModelInfo {
 	return chat.ModelInfo{
-		Provider:         providerName,
+		Provider:         c.cfg.Provider,
+		API:              API,
 		Model:            c.cfg.Model,
 		MaxInputTokens:   c.cfg.MaxInputTokens,
 		MaxOutputTokens:  c.cfg.MaxOutputTokens,
@@ -185,7 +194,7 @@ func (c *Client) wrapError(ctx context.Context, err error) *chat.Error {
 	}
 	ce := chat.WrapError(ctx, err, status, retryAfter)
 	if ce.Message == "" {
-		ce.Message = providerName
+		ce.Message = c.cfg.Provider
 	}
 	return ce
 }

@@ -55,7 +55,7 @@ func NormalizeForModel(msgs []Message, target ModelInfo, opts ...NormalizeOption
 			if msg.StopReason == StopReasonError || msg.StopReason == StopReasonAborted {
 				continue
 			}
-			sameModel := msg.Provider == target.Provider && msg.Model == target.Model
+			sameModel := msg.Provider == target.Provider && msg.API == target.API && msg.Model == target.Model
 			msg.Content = transformAssistantContent(msg.Content, sameModel, target.ImageOutput, cfg, idMap)
 			if len(msg.Content) == 0 {
 				continue

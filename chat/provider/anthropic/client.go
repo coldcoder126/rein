@@ -27,6 +27,9 @@ const (
 	ModelClaudeHaiku4_5  = "claude-haiku-4-5"
 
 	providerName = "anthropic"
+
+	// API is the protocol this client speaks, see chat.ModelInfo.API.
+	API = "anthropic-messages"
 )
 
 // APIKeyProvider resolves the API key dynamically, for short-lived tokens.
@@ -34,6 +37,8 @@ type APIKeyProvider func(ctx context.Context) (string, error)
 
 // Config configures the Anthropic Client.
 type Config struct {
+	// Provider names the vendor in messages, usage and errors; "anthropic" by default. Set it for compatible endpoints.
+	Provider       string
 	APIKey         string
 	APIKeyProvider APIKeyProvider
 	BaseURL        string
@@ -71,13 +76,16 @@ func New(cfg Config) *Client {
 	if cfg.Model == "" {
 		panic("anthropic: Config.Model must not be empty")
 	}
+	if cfg.Provider == "" {
+		cfg.Provider = providerName
+	}
 	return &Client{cfg: cfg}
 }
 
 // Stream sends a streaming request. Tool call arguments are assembled inside the provider before they are emitted.
 func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
 	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, providerName, string(c.resolveModel(req)))
+		b := chat.NewBuilder(yield, c.modelInfo(req))
 
 		client, err := c.newSDKClient(ctx)
 		if err != nil {
@@ -192,7 +200,8 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 func (c *Client) Info() chat.ModelInfo {
 	spec := c.spec(c.cfg.Model)
 	return chat.ModelInfo{
-		Provider:         providerName,
+		Provider:         c.cfg.Provider,
+		API:              API,
 		Model:            c.cfg.Model,
 		MaxInputTokens:   spec.maxInput,
 		MaxOutputTokens:  spec.maxOutput,
@@ -258,7 +267,7 @@ func (c *Client) wrapError(ctx context.Context, err error) *chat.Error {
 	}
 	ce := chat.WrapError(ctx, err, status, retryAfter)
 	if ce.Message == "" {
-		ce.Message = providerName
+		ce.Message = c.cfg.Provider
 	}
 	return ce
 }

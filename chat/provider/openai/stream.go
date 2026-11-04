@@ -54,7 +54,8 @@ func (it outputItem) reasoningText() string {
 // An output item's output_item.done is the authoritative final state; at response.completed the final output list
 // fills in items without a done event, for endpoints that omit some events.
 type streamState struct {
-	b *chat.Builder
+	b        *chat.Builder
+	provider string
 
 	done map[string]bool
 	// blockOf maps output items to their text or thinking block positions, used to add signatures and close blocks on completion.
@@ -70,9 +71,10 @@ type streamState struct {
 	incomplete string
 }
 
-func newStreamState(b *chat.Builder) *streamState {
+func newStreamState(b *chat.Builder, provider string) *streamState {
 	return &streamState{
 		b:        b,
+		provider: provider,
 		done:     make(map[string]bool),
 		blockOf:  make(map[string]int),
 		toolArgs: make(map[string]*strings.Builder),
@@ -278,7 +280,7 @@ func imageMIME(format string) string {
 
 func (s *streamState) fail(code, message string) bool {
 	text := strings.TrimSpace(code + ": " + message)
-	s.b.Fail(&chat.Error{Kind: chat.ClassifyMessage(text), Message: providerName + ": " + text})
+	s.b.Fail(&chat.Error{Kind: chat.ClassifyMessage(text), Message: s.provider + ": " + text})
 	return false
 }
 

@@ -62,11 +62,10 @@ func WithHooks(h Hooks) Middleware {
 		return func(yield func(Event) bool) {
 			if h.BeforeRequest != nil {
 				if err := h.BeforeRequest(ctx, &req); err != nil {
-					model := req.Model
-					if model == "" {
-						model = info.Model
+					if req.Model != "" {
+						info.Model = req.Model
 					}
-					NewBuilder(yield, info.Provider, model).Fail(err)
+					NewBuilder(yield, info).Fail(err)
 					return
 				}
 			}
