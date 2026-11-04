@@ -22,7 +22,7 @@ import (
 // cancellation returns the ctx error, and reaching the turn limit returns ErrMaxTurnsExceeded; in these three cases Result is still valid
 // and contains the messages produced so far. Result may be nil for invalid input, or when a toolset, middleware or event handler fails.
 func (a *Agent) Run(ctx context.Context, in Input) (*Result, error) {
-	if a.Model == nil {
+	if a.Model == nil && in.Model == nil {
 		return nil, errors.New("agent: Model must not be nil")
 	}
 	if len(in.Messages) == 0 {
@@ -39,6 +39,9 @@ func (a *Agent) Run(ctx context.Context, in Input) (*Result, error) {
 		in.RunInfo.RootSessionID = in.RunInfo.SessionID
 	}
 	l := &loop{agent: *a, in: in, depth: depth, messages: slices.Clone(in.Messages), result: &Result{}, start: time.Now()}
+	if in.Model != nil {
+		l.agent.Model = in.Model
+	}
 	l.agent.applyDefaults()
 	l.middlewares = slices.Concat(a.Middlewares, in.Middlewares)
 	l.serializeEmit()

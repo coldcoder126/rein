@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coldcoder126/rein/agent"
+	"github.com/coldcoder126/rein/chat"
 	"github.com/coldcoder126/rein/session"
 	"github.com/coldcoder126/rein/tool"
 )
@@ -147,6 +148,14 @@ func New(cfg Config) (*Runner, error) {
 		active: make(map[string]*runHandle),
 		tasks:  make(map[string]*task),
 	}, nil
+}
+
+// model returns override when set, otherwise Agent.Model.
+func (r *Runner) model(override chat.Client) chat.Client {
+	if override != nil {
+		return override
+	}
+	return r.agent.Model
 }
 
 // Store returns the underlying session store, for reading history.

@@ -22,7 +22,7 @@ const (
 	defaultMaxToolResultBytes = 100_000
 )
 
-// Agent is the definition of an agent. Beyond the zero value, at least Model must be set.
+// Agent is the definition of an agent. Beyond the zero value, at least Model must be set, unless every run sets Input.Model.
 //
 // Extensions at the model call level (logging, usage, retries, fallbacks) wrap Model with chat.Chain;
 // Middlewares cover the loop itself: the run, each turn, each turn's model request, and tool execution.
@@ -37,6 +37,7 @@ type Agent struct {
 	Instruction     string
 	InstructionFunc func(ctx context.Context, info tool.RunInfo) (string, error)
 
+	// Model is the default model; Input.Model overrides it for a single run.
 	Model chat.Client
 	// Options are passed unchanged to every model call; Metadata additionally carries turn_index.
 	Options chat.Options
@@ -76,6 +77,10 @@ type Input struct {
 	Steering func(ctx context.Context) ([]chat.Message, error)
 	// FollowUp is called when the loop would otherwise end; returning messages continues the run, for queued follow-up tasks.
 	FollowUp func(ctx context.Context) ([]chat.Message, error)
+	// Model overrides Agent.Model for this run when set. General sub-agents started by the run use it too;
+	// specialized sub-agents keep their own Model. Agent.Options are passed unchanged, so leave model-specific
+	// options such as Options.Model and MaxTokens unset when runs switch between models.
+	Model chat.Client
 	// Middlewares belong to this run only. They sit inside Agent.Middlewares and are not inherited by sub-agents.
 	// Upper layers (such as the runner's history compaction) use them to hook into the run.
 	Middlewares []Middleware

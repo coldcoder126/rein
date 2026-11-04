@@ -186,7 +186,7 @@ func TestManualCompaction(t *testing.T) {
 	)
 	submit(t, h, "问题一")
 	submit(t, h, "问题二")
-	summary, usage, err := h.Compact(bg, "c", "重点保留数字")
+	summary, usage, err := h.Compact(bg, "c", CompactOptions{Instructions: "重点保留数字"})
 	if err != nil || usage.TotalTokens != 42 || summary == nil || summary.Type != session.TypeSummary || summary.Text() != "手动摘要" || summary.FirstKeptID == "" {
 		t.Fatalf("should generate and return the stored summary and its usage: %+v %+v %v", summary, usage, err)
 	}
@@ -204,7 +204,7 @@ func TestManualCompaction(t *testing.T) {
 	}
 
 	busy, _ := h.acquire("c", func() {}, false)
-	if _, _, err := h.Compact(bg, "c", ""); !errors.Is(err, ErrBusy) {
+	if _, _, err := h.Compact(bg, "c", CompactOptions{}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("should return ErrBusy while the session is running: %v", err)
 	}
 	h.release("c", busy)
@@ -217,7 +217,7 @@ func TestManualCompaction(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := r.Compact(bg, "c", ""); err != nil {
+	if _, _, err := r.Compact(bg, "c", CompactOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := custom.Requests()[2].Options; got.MaxTokens != 100 || got.CacheRetention != chat.CacheRetentionShort || got.Reasoning != chat.ReasoningLow {
@@ -225,8 +225,30 @@ func TestManualCompaction(t *testing.T) {
 	}
 
 	off, _ := newRunner(t, newClient(), func(cfg *Config) { cfg.DisableCompaction = true })
-	if _, _, err := off.Compact(bg, "c", ""); err == nil {
+	if _, _, err := off.Compact(bg, "c", CompactOptions{}); err == nil {
 		t.Fatal("should return an error when compaction is disabled")
+	}
+}
+
+func TestCompactionFollowsTheRunModel(t *testing.T) {
+	// The default model declares no context limit, so only the run's model can trigger compaction.
+	base := newClient()
+	other := newClient(sayWithUsage("回答一", 300), sayWithUsage("回答二", 900), chattest.Say("这是摘要"), chattest.Say("回答三"), chattest.Say("手动摘要"))
+	other.Model.MaxInputTokens = 1000
+	r, _ := newRunner(t, base)
+	for _, q := range []string{"问题一", "问题二", "问题三"} {
+		if _, err := r.Run(bg, "c", Text(long(q)), WithModel(other)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests := other.Requests(); len(requests) != 4 || !strings.Contains(requestText(requests[3]), "这是摘要") {
+		t.Fatalf("compaction should use the run's model for its limit and the summary: %d requests", len(requests))
+	}
+	if summary, _, err := r.Compact(bg, "c", CompactOptions{Model: other}); err != nil || summary == nil || summary.Text() != "手动摘要" {
+		t.Fatalf("manual compaction should use the given model: %+v %v", summary, err)
+	}
+	if n := len(base.Requests()); n != 0 {
+		t.Fatalf("the default model should not be called: %d requests", n)
 	}
 }
 

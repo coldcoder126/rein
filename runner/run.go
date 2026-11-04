@@ -113,7 +113,7 @@ func (r *Runner) run(ctx context.Context, sessionID string, in Input, opts []Run
 	if parent := options.parent; parent != nil {
 		info.ParentSessionID, info.RootSessionID = parent.SessionID, parent.RootSessionID
 	}
-	st := &runState{r: r, handle: h, sink: sink, info: info, result: &Result{SessionID: sessionID, RunID: h.runID}}
+	st := &runState{r: r, handle: h, sink: sink, info: info, model: r.model(options.model), result: &Result{SessionID: sessionID, RunID: h.runID}}
 	st.emit(Event{Type: EventRunStart})
 	err = st.execute(runCtx, content, options)
 
@@ -155,8 +155,10 @@ type runState struct {
 	r      *Runner
 	handle *runHandle
 	// sink receives the events of this run; when nil no events are produced.
-	sink   func(Event)
-	info   tool.RunInfo
+	sink func(Event)
+	info tool.RunInfo
+	// model is the model of this run: the one given by WithModel, or Agent.Model.
+	model  chat.Client
 	result *Result
 	// batches are messages taken from the queues and waiting for the Agent to inject them. They are stored only when actually injected,
 	// so messages that were canceled or never injected because the turns ran out do not enter history.
@@ -224,6 +226,7 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 	a.Middlewares = slices.Concat(r.middlewares, a.Middlewares)
 	in := agent.Input{
 		RunInfo:     st.info,
+		Model:       st.model,
 		Emit:        st.handleAgentEvent,
 		Middlewares: []agent.Middleware{{WrapTurn: st.wrapTurn}},
 		// Task result notices are taken in two places: those arriving between turns are injected in the next turn, and those arriving when the loop would end make it run one more turn.

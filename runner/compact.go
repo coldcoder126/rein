@@ -279,13 +279,20 @@ func estimateContext(messages []session.Message, fresh int, systemPrompt string)
 	return total
 }
 
+// CompactOptions adjusts a manual compaction.
+type CompactOptions struct {
+	// Instructions are extra requirements for the summary and may be empty; see CompactInput.Instructions.
+	Instructions string
+	// Model generates the summary instead of Agent.Model, typically the model the session currently runs on.
+	Model chat.Client
+}
+
 // Compact immediately compacts the history of an idle session, for when the user asks for it, and returns the stored summary message and
 // the tokens consumed generating it; the summary is nil when there is nothing to compact. On error the tokens already consumed are still returned.
-// instructions are extra requirements for the summary and may be empty; see CompactInput.Instructions.
 //
-// The session is occupied during compaction: Run returns ErrBusy, Steer / FollowUp return ErrNotRunning, Abort cancels the compaction,
+// The session is occupied during compaction: Start returns ErrBusy, Steer / FollowUp return ErrNotRunning, Abort cancels the compaction,
 // and background task results are written to history after it ends. It returns ErrBusy while the session is running, and an error when compaction is disabled.
-func (r *Runner) Compact(ctx context.Context, sessionID, instructions string) (*session.Message, chat.Usage, error) {
+func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOptions) (*session.Message, chat.Usage, error) {
 	if r.compactor == nil {
 		return nil, chat.Usage{}, errors.New("runner: compaction is disabled")
 	}
@@ -296,8 +303,8 @@ func (r *Runner) Compact(ctx context.Context, sessionID, instructions string) (*
 		return nil, chat.Usage{}, err
 	}
 	defer r.release(sessionID, h)
-	st := &runState{r: r, handle: h, info: tool.RunInfo{SessionID: sessionID, RunID: h.runID, RootSessionID: sessionID}, result: &Result{}}
-	summary, err := st.compact(ctx, CompactManual, instructions)
+	st := &runState{r: r, handle: h, info: tool.RunInfo{SessionID: sessionID, RunID: h.runID, RootSessionID: sessionID}, model: r.model(opts.Model), result: &Result{}}
+	summary, err := st.compact(ctx, CompactManual, opts.Instructions)
 	return summary, st.result.Usage, err
 }
 
@@ -305,7 +312,7 @@ func (r *Runner) Compact(ctx context.Context, sessionID, instructions string) (*
 // When the model declares no context limit, only manual compaction happens.
 func (st *runState) compact(ctx context.Context, reason CompactReason, instructions string) (*session.Message, error) {
 	r := st.r
-	limit := r.agent.Model.Info().MaxInputTokens
+	limit := st.model.Info().MaxInputTokens
 	if r.compactor == nil || (limit <= 0 && reason != CompactManual) {
 		return nil, nil
 	}
@@ -320,7 +327,7 @@ func (st *runState) compact(ctx context.Context, reason CompactReason, instructi
 		MaxInputTokens: max(limit, 0),
 		Reason:         reason,
 		Instructions:   instructions,
-		Client:         r.agent.Model,
+		Client:         st.model,
 	})
 	if err != nil || result == nil {
 		return nil, err

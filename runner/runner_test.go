@@ -719,6 +719,22 @@ func TestSubAgentRunsInBackground(t *testing.T) {
 	}
 }
 
+func TestGeneralSubAgentUsesTheRunModel(t *testing.T) {
+	base := newClient()
+	other := newClient(chattest.CallTools(subAgentCall("c1", `{"task":"查一下","description":"查"}`)), chattest.Say("好"), chattest.Say("好"))
+	rec := newTaskRecorder()
+	r, _ := newRunner(t, base, func(c *Config) {
+		c.Agent.Tools = append(c.Agent.Tools, agent.SubAgentTool(agent.SubAgentConfig{}), tasktool.Tool())
+		rec.install(c)
+	})
+	if _, err := r.Run(bg, "p", Text("开始"), WithModel(other)); err != nil {
+		t.Fatal(err)
+	}
+	if f := rec.wait(t); f.task.Status != tool.TaskCompleted || len(other.Requests()) != 3 || len(base.Requests()) != 0 {
+		t.Fatalf("the general sub-agent should run on the run's model: %+v requests=%d/%d", f.task, len(other.Requests()), len(base.Requests()))
+	}
+}
+
 func TestEnvironmentMiddlewaresApplyToSubAgents(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string

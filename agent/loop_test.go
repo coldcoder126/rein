@@ -150,6 +150,16 @@ func TestRunPassesOptionsAndTurnIndex(t *testing.T) {
 	}
 }
 
+func TestInputModelOverridesAgentModel(t *testing.T) {
+	client := chattest.NewClient(chattest.Say("完成"))
+	if _, err := (&Agent{}).Run(context.Background(), Input{Messages: user("查询"), Model: client}); err != nil || len(client.Requests()) != 1 {
+		t.Fatalf("the run should use Input.Model: %v requests=%d", err, len(client.Requests()))
+	}
+	if _, err := (&Agent{}).Run(context.Background(), Input{Messages: user("查询")}); err == nil {
+		t.Fatal("a run without any model should fail")
+	}
+}
+
 func TestRunEmitsAssistantStreamEvents(t *testing.T) {
 	client := chattest.NewClient(func(_ context.Context, b *chat.Builder) {
 		b.ThinkingDelta("想")

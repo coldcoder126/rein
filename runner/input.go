@@ -84,6 +84,7 @@ type RunOption func(*runOptions)
 type runOptions struct {
 	context []ContextInput
 	details any
+	model   chat.Client
 	// A non-nil parent means this run is a sub-task, and its session hangs under the session of the run that started it.
 	parent *tool.RunInfo
 }
@@ -96,4 +97,10 @@ func WithContext(inputs ...ContextInput) RunOption {
 // WithDetails attaches business data to this run's user message (session.Message.Details).
 func WithDetails(details any) RunOption {
 	return func(o *runOptions) { o.details = details }
+}
+
+// WithModel runs the Agent on model instead of Agent.Model for this run. Compaction during the run uses it as well,
+// for both its context limit and generating the summary. See agent.Input.Model.
+func WithModel(model chat.Client) RunOption {
+	return func(o *runOptions) { o.model = model }
 }
