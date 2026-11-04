@@ -332,7 +332,7 @@ func TestBuildParamsReasoning(t *testing.T) {
 			[]string{`"budget_tokens":8192`, `"type":"enabled"`, `"max_tokens":9192`}, []string{`"output_config"`}},
 		{"budget within the model output limit", Config{Model: ModelClaudeHaiku4_5, MaxOutputTokens: 4096}, chat.Options{Reasoning: chat.ReasoningHigh},
 			[]string{`"budget_tokens":3072`, `"max_tokens":4096`}, nil},
-		{"compatible endpoints force budget thinking", Config{Model: "deepseek-v4-flash"}, chat.Options{Reasoning: chat.ReasoningLow},
+		{"compatible endpoints force budget thinking", Config{Model: "deepseek-flash"}, chat.Options{Reasoning: chat.ReasoningLow},
 			[]string{`"budget_tokens":2048`}, nil},
 	}
 	for _, tc := range cases {
@@ -428,11 +428,11 @@ func TestBuildParamsStructuredOutput(t *testing.T) {
 	if !strings.Contains(got, `"output_config":{"effort":"low","format":{"schema":{"type":"object"},"type":"json_schema"}}`) {
 		t.Fatalf("should use native output_config.format alongside effort: %s", got)
 	}
-	got = paramsJSON(t, New(Config{Model: "deepseek-v4-flash"}), chat.Request{SystemPrompt: "你是助手", Options: output})
+	got = paramsJSON(t, New(Config{Model: "deepseek-flash"}), chat.Request{SystemPrompt: "你是助手", Options: output})
 	if strings.Contains(got, "json_schema") || !strings.Contains(got, `JSON Schema:\n\n{\"type\":\"object\"}`) {
 		t.Fatalf("compatible endpoints should write the schema into the system prompt: %s", got)
 	}
-	if New(Config{Model: "deepseek-v4-flash"}).Info().StructuredOutput || !New(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
+	if New(Config{Model: "deepseek-flash"}).Info().StructuredOutput || !New(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
 		t.Fatal("model info should reflect native structured output support")
 	}
 }

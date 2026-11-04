@@ -8,32 +8,27 @@ import (
 )
 
 func TestNewAnthropicDefaults(t *testing.T) {
-	client := NewAnthropic(anthropicprovider.Config{Model: ModelDeepSeekV4Flash})
-	info := client.Info()
-	if info.Model != ModelDeepSeekV4Flash {
-		t.Fatalf("wrong default model: %s", info.Model)
+	info := NewAnthropic(anthropicprovider.Config{Model: ModelDeepSeekFlash}).Info()
+	if info.Model != ModelDeepSeekFlash || info.MaxInputTokens != 256_000 {
+		t.Fatalf("wrong preset: %+v", info)
 	}
-	if info.MaxInputTokens != 256_000 {
-		t.Fatalf("wrong default context window: %d", info.MaxInputTokens)
+	if !info.SupportsMedia || info.FileScope != "" {
+		t.Fatalf("media should be passed through and files not used: %+v", info)
 	}
-	if info.SupportsMedia {
-		t.Fatal("DeepSeek's Anthropic-compatible endpoint does not support images")
+	if NewAnthropic(anthropicprovider.Config{Model: ModelDeepSeekV4Pro, TextOnly: true}).Info().SupportsMedia {
+		t.Fatal("TextOnly should be honored")
 	}
 }
 
 func TestNewResponsesDefaults(t *testing.T) {
-	client := NewResponses(openaiprovider.Config{Model: ModelDeepSeekV4Flash})
-	info := client.Info()
-	if info.Model != ModelDeepSeekV4Flash {
-		t.Fatalf("wrong default model: %s", info.Model)
+	info := NewResponses(openaiprovider.Config{Model: ModelDeepSeekFlash}).Info()
+	if info.Model != ModelDeepSeekFlash || info.MaxInputTokens != 1_000_000 || info.MaxOutputTokens != 384_000 || info.Provider != "openai" {
+		t.Fatalf("wrong preset: %+v", info)
 	}
-	if info.MaxInputTokens != 1_000_000 {
-		t.Fatalf("wrong default context window: %d", info.MaxInputTokens)
+	if !info.SupportsMedia || info.StructuredOutput || info.FileScope != "" {
+		t.Fatalf("media should be passed through, structured output and files off: %+v", info)
 	}
-	if info.MaxOutputTokens != 384_000 {
-		t.Fatalf("wrong default output limit: %d", info.MaxOutputTokens)
-	}
-	if info.SupportsMedia || info.Provider != "openai" {
-		t.Fatalf("the DeepSeek Responses preset should be text only: %+v", info)
+	if NewResponses(openaiprovider.Config{Model: ModelDeepSeekV4Pro, TextOnly: true}).Info().SupportsMedia {
+		t.Fatal("TextOnly should be honored")
 	}
 }
