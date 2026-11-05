@@ -10,7 +10,7 @@ require (
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/image v0.47.0
-	google.golang.org/genai v1.73.0
+	google.golang.org/genai v1.77.0
 )
 
 require (
