@@ -25,8 +25,8 @@ import (
 var (
 	// ErrBusy means the session already has a run in progress.
 	ErrBusy = errors.New("runner: session is busy")
-	// ErrNotRunning means the session has no run in progress, so messages cannot be queued.
-	ErrNotRunning = errors.New("runner: session is not running")
+	// ErrNotRunning means the run no longer takes queued messages: it is finishing or has ended, or it does not run the Agent.
+	ErrNotRunning = errors.New("runner: run is not running")
 	// ErrInvalidConfig means the Runner configuration is incomplete.
 	ErrInvalidConfig = errors.New("runner: invalid config")
 
@@ -92,17 +92,19 @@ type Runner struct {
 
 	mu     sync.Mutex
 	active map[string]*Run
-	// waiters are the Subscribe calls waiting for the next run of an idle session, keyed by session ID.
-	waiters map[string]*waiter
+	// followers track the runs of sessions that Subscribe calls follow, keyed by session ID.
+	followers map[string]*follower
 	// tasks are the background tasks spawned by sessions on this Runner whose results have not been delivered, keyed by task ID.
 	tasks map[string]*task
 }
 
-// Run is a run started by Start. It runs in the background whether or not anyone watches it: Events replays its events from the start
-// to any number of receivers, and Wait waits for its result. Steer, FollowUp and Abort operate on a session's current run by session ID.
+// Run is one occupation of a session, the handle for everything about it: it runs in the background whether or not anyone watches it,
+// Events replays its events from the start to any number of receivers, Wait waits for its result, and Steer, FollowUp and Abort act on it.
+// Start returns it, and Current finds the one in progress by session ID.
 //
-// A session is also occupied by manual compaction and by writing a background task result to history; those occupations are Runs
-// without events. All fields are guarded by Runner.mu; the state private to the run's goroutine is in runState.
+// Besides runs of the Agent, manual compaction and writing a background task result to an idle session's history occupy the session too.
+// They are Runs as well, with their own events (run_start, the stored messages, run_end) and Result, so every occupation looks the same.
+// All fields are guarded by Runner.mu; the state private to the run's goroutine is in runState.
 type Run struct {
 	r         *Runner
 	id        string
@@ -121,6 +123,9 @@ type Run struct {
 	// result and err are set before done is closed.
 	result *Result
 	err    error
+	// next is the session's following occupation, set while the session has followers; nextReady is closed once it is set.
+	next      *Run
+	nextReady chan struct{}
 
 	steer    []session.Message
 	followUp []session.Message
@@ -165,9 +170,9 @@ func New(cfg Config) (*Runner, error) {
 		onTaskProgressed: cfg.OnTaskProgressed,
 		onTaskFinished:   cfg.OnTaskFinished,
 
-		active:  make(map[string]*Run),
-		waiters: make(map[string]*waiter),
-		tasks:   make(map[string]*task),
+		active:    make(map[string]*Run),
+		followers: make(map[string]*follower),
+		tasks:     make(map[string]*task),
 	}, nil
 }
 
@@ -182,11 +187,12 @@ func (r *Runner) model(override chat.Client) chat.Client {
 // Store returns the underlying session store, for reading history.
 func (r *Runner) Store() session.Store { return r.store }
 
-// Running reports whether the session currently has a run in progress.
-func (r *Runner) Running(sessionID string) bool {
+// Current returns the session's run in progress, or nil when the session is idle. It suits requests that know only the session,
+// such as a reopened page: follow the run with Events, then call Wait, after which the session is free.
+func (r *Runner) Current(sessionID string) *Run {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.active[sessionID] != nil
+	return r.active[sessionID]
 }
 
 // acquire occupies the session and registers a Run, returning ErrBusy when the session already has a run.
@@ -200,19 +206,21 @@ func (r *Runner) acquire(sessionID string, cancel context.CancelFunc, ending boo
 	return r.occupy(sessionID, cancel, ending), nil
 }
 
-// occupy registers a new Run for an idle session and wakes the Subscribe calls waiting for it. The caller must hold Runner.mu.
+// occupy registers a new Run for an idle session and links it after the previous one for the session's followers.
+// The caller must hold Runner.mu.
 func (r *Runner) occupy(sessionID string, cancel context.CancelFunc, ending bool) *Run {
 	run := &Run{r: r, id: newID("run"), sessionID: sessionID, cancel: cancel, done: make(chan struct{}),
-		lastUpdate: -1, wake: make(chan struct{}), ending: ending}
+		lastUpdate: -1, wake: make(chan struct{}), nextReady: make(chan struct{}), ending: ending}
 	r.active[sessionID] = run
-	if w := r.waiters[sessionID]; w != nil {
-		close(w.ch)
-		delete(r.waiters, sessionID)
+	if f := r.followers[sessionID]; f != nil {
+		f.latest.next = run
+		close(f.latest.nextReady)
+		f.latest = run
 	}
 	return run
 }
 
-// release frees the session: it unregisters the Run, cancels it and wakes its waiters.
+// release frees the session: it unregisters the Run, cancels it and wakes Wait and Events receivers.
 func (r *Runner) release(sessionID string, run *Run) {
 	r.mu.Lock()
 	delete(r.active, sessionID)

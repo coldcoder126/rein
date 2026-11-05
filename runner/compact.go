@@ -9,7 +9,6 @@ import (
 	"github.com/coldcoder126/rein/agent"
 	"github.com/coldcoder126/rein/chat"
 	"github.com/coldcoder126/rein/session"
-	"github.com/coldcoder126/rein/tool"
 )
 
 // CompactInput is the input of one compaction decision.
@@ -290,8 +289,9 @@ type CompactOptions struct {
 // Compact immediately compacts the history of an idle session, for when the user asks for it, and returns the stored summary message and
 // the tokens consumed generating it; the summary is nil when there is nothing to compact. On error the tokens already consumed are still returned.
 //
-// The session is occupied during compaction: Start returns ErrBusy, Steer / FollowUp return ErrNotRunning, Abort cancels the compaction,
-// and background task results are written to history after it ends. It returns ErrBusy while the session is running, and an error when compaction is disabled.
+// Compaction is a run of its own: Current returns it, Events gives run_start, the stored summary and run_end, and Abort cancels it.
+// Meanwhile Start returns ErrBusy, and background task results are written to history after it ends.
+// It returns ErrBusy while the session is running, and an error when compaction is disabled.
 func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOptions) (*session.Message, chat.Usage, error) {
 	if r.compactor == nil {
 		return nil, chat.Usage{}, errors.New("runner: compaction is disabled")
@@ -300,15 +300,17 @@ func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOpti
 		return nil, chat.Usage{}, errNoModel
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	h, err := r.acquire(sessionID, cancel, true)
+	run, err := r.acquire(sessionID, cancel, true)
 	if err != nil {
 		cancel()
 		return nil, chat.Usage{}, err
 	}
-	defer r.release(sessionID, h)
-	st := &runState{r: r, handle: h, silent: true, info: tool.RunInfo{SessionID: sessionID, RunID: h.id, RootSessionID: sessionID}, model: r.model(opts.Model), result: &Result{}}
-	summary, err := st.compact(ctx, CompactManual, opts.Instructions)
-	return summary, st.result.Usage, err
+	var summary *session.Message
+	result, err := r.occupation(ctx, run, r.model(opts.Model), func(st *runState) (err error) {
+		summary, err = st.compact(ctx, CompactManual, opts.Instructions)
+		return err
+	})
+	return summary, result.Usage, err
 }
 
 // compact compacts the session history when needed and stores the summary, returning the stored summary message, or nil when it did not compact.

@@ -248,6 +248,41 @@ func TestCompactionFollowsTheRunModel(t *testing.T) {
 	}
 }
 
+func TestManualCompactionIsARun(t *testing.T) {
+	h, _, _ := compactRunner(t, 0, chattest.Say("回答一"), chattest.Say("回答二"), chattest.Say("摘要"))
+	submit(t, h, "问题一")
+	submit(t, h, "问题二")
+	ctx, cancel := context.WithCancel(bg)
+	defer cancel()
+	followed := make(chan Event, 16)
+	go func() {
+		for event := range h.Subscribe(ctx, "c") {
+			followed <- event
+		}
+	}()
+	waitFor(t, "订阅就绪", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return h.followers["c"] != nil
+	})
+	summary, _, err := h.Compact(bg, "c", CompactOptions{})
+	if err != nil || summary == nil {
+		t.Fatal(err)
+	}
+	var types []string
+	var end Event
+	for end.Type != EventRunEnd {
+		end = <-followed
+		types = append(types, string(end.Type))
+	}
+	if got := strings.Join(types, ","); got != "run_start,message_saved,compaction,run_end" {
+		t.Fatalf("manual compaction should have the events of a run: %s", got)
+	}
+	if res := end.Result; res.Status != agent.StatusCompleted || len(res.Messages) != 1 || res.Messages[0].ID != summary.ID || res.RunID != summary.RunID {
+		t.Fatalf("manual compaction should end with a Result holding the summary: %+v", res)
+	}
+}
+
 type fixedCompactor struct {
 	calls  int
 	result func(in CompactInput) (*CompactResult, error)

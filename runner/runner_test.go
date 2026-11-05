@@ -184,7 +184,7 @@ func TestSessionsAreIsolatedAndRunConcurrently(t *testing.T) {
 	if result, err := runSync(r, bg, "乙", Text("乙的问题")); err != nil || result.Final.Text() != "回答乙" {
 		t.Fatalf("different sessions should run concurrently: %+v %v", result, err)
 	}
-	if !r.Running("甲") || r.Running("乙") {
+	if r.Current("甲") == nil || r.Current("乙") != nil {
 		t.Fatal("the state should reflect whether each session is running")
 	}
 	close(client.release)
@@ -207,14 +207,15 @@ func TestSteerIsInjectedBetweenTurnsAndFollowUpAtTheEnd(t *testing.T) {
 	r, store := newRunner(t, client)
 	done := runAsync(r, "s", "开始")
 	<-client.started
+	run := r.Current("s")
 	// Queue while the first model call has not returned: follow-up first, then steer, but steer should be handled first.
-	if err := r.FollowUp("s", Text("再做一件事")); err != nil {
+	if err := run.FollowUp(Text("再做一件事")); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.FollowUp("s", Text("还有一件")); err != nil {
+	if err := run.FollowUp(Text("还有一件")); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Steer("s", Text("改一下方向")); err != nil {
+	if err := run.Steer(Text("改一下方向")); err != nil {
 		t.Fatal(err)
 	}
 	close(client.release)
@@ -239,8 +240,8 @@ func TestSteerIsInjectedBetweenTurnsAndFollowUpAtTheEnd(t *testing.T) {
 	if len(out.result.Pending.Steer)+len(out.result.Pending.FollowUp) != 0 {
 		t.Fatalf("nothing should be pending once everything is processed: %+v", out.result.Pending)
 	}
-	if err := r.Steer("s", Text("太晚了")); !errors.Is(err, ErrNotRunning) {
-		t.Fatalf("queuing while idle should return ErrNotRunning: %v", err)
+	if err := run.Steer(Text("太晚了")); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("queuing on an ended run should return ErrNotRunning: %v", err)
 	}
 }
 
@@ -262,9 +263,10 @@ func TestAbortReturnsQueuedMessagesWithoutSavingThem(t *testing.T) {
 		done <- outcome{result, err}
 	}()
 	<-client.started
-	_ = r.Steer("s", Text("转向"))
-	_ = r.FollowUp("s", Text("后续"))
-	pending := r.Abort("s")
+	run := r.Current("s")
+	_ = run.Steer(Text("转向"))
+	_ = run.FollowUp(Text("后续"))
+	pending := run.Abort()
 	out := <-done
 
 	if len(pending.Steer) != 1 || pending.Steer[0].Text() != "转向" || len(pending.FollowUp) != 1 || pending.FollowUp[0].Text() != "后续" {
@@ -280,11 +282,8 @@ func TestAbortReturnsQueuedMessagesWithoutSavingThem(t *testing.T) {
 	if got := sessionRoles(all); got != "user,assistant" || all[1].ChatMessage.StopReason != chat.StopReasonAborted {
 		t.Fatalf("the canceled assistant message should be stored, queued messages should not enter history: %s", got)
 	}
-	if q := r.Abort("s"); q.Steer != nil || q.FollowUp != nil {
-		t.Fatal("Abort while idle should return an empty queue")
-	}
-	if err := r.Wait(bg, "s"); err != nil {
-		t.Fatalf("Wait while idle should return immediately: %v", err)
+	if q := run.Abort(); q.Steer != nil || q.FollowUp != nil || r.Current("s") != nil {
+		t.Fatal("Abort on an ended run should return an empty queue")
 	}
 }
 
@@ -293,7 +292,7 @@ func TestMaxTurnsLeavesUnprocessedMessagesPending(t *testing.T) {
 	r, store := newRunner(t, client, func(c *Config) { c.Agent.MaxTurns = 1 })
 	done := runAsync(r, "s", "开始")
 	<-client.started
-	_ = r.Steer("s", Text("来不及处理"))
+	_ = r.Current("s").Steer(Text("来不及处理"))
 	close(client.release)
 	out := <-done
 	if !errors.Is(out.err, agent.ErrMaxTurnsExceeded) || out.result.Status != agent.StatusMaxTurns {
@@ -357,7 +356,7 @@ func TestAbortedMessageIsSavedByStoreThatHonorsContext(t *testing.T) {
 		done <- outcome{result, err}
 	}()
 	<-client.started
-	r.Abort("s")
+	r.Current("s").Abort()
 	out := <-done
 
 	if !errors.Is(out.err, context.Canceled) || out.result.Status != agent.StatusAborted {
@@ -498,9 +497,9 @@ func TestRunOutlivesItsCallerAndStopsOnAbort(t *testing.T) {
 	r, _ = newRunner(t, gated)
 	run, _ = r.Start(bg, "s", Text("开始"))
 	<-gated.started
-	r.Abort("s")
+	run.Abort()
 	result, err = run.Wait(bg)
-	if !errors.Is(err, context.Canceled) || result.Status != agent.StatusAborted || r.Running("s") {
+	if !errors.Is(err, context.Canceled) || result.Status != agent.StatusAborted || r.Current("s") != nil {
 		t.Fatalf("Abort should stop the run, and the session should be free once Wait returns: %+v %v", result, err)
 	}
 }
@@ -578,34 +577,77 @@ func TestEventsAndSubscribeReplayToEveryReceiver(t *testing.T) {
 	for range followed {
 	}
 	r.mu.Lock()
-	waiting := len(r.waiters)
+	following := len(r.followers)
 	r.mu.Unlock()
-	if waiting != 0 {
-		t.Fatalf("a canceled Subscribe should stop waiting: %d", waiting)
+	if following != 0 {
+		t.Fatalf("a canceled Subscribe should stop following: %d", following)
 	}
 }
 
-func TestWaitReturnsAfterRun(t *testing.T) {
+func TestSubscribeMissesNoRunWhileReceiverIsBusy(t *testing.T) {
+	client := newGatedClient(chattest.Say("一"), chattest.Say("二"))
+	r, _ := newRunner(t, client)
+	first, err := r.Start(bg, "s", Text("开始"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-client.started
+	ctx, cancel := context.WithCancel(bg)
+	defer cancel()
+	followed := make(chan Event) // unbuffered: the receiver is busy until the test reads
+	go func() {
+		for event := range r.Subscribe(ctx, "s") {
+			followed <- event
+		}
+	}()
+	<-followed
+	// Both runs start and end while the receiver is still stuck on the first event it handed over.
+	close(client.release)
+	if _, err := first.Wait(bg); err != nil {
+		t.Fatal(err)
+	}
+	second, err := runSync(r, bg, "s", Text("再来"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ends []string
+	for len(ends) < 2 {
+		if event := <-followed; event.Type == EventRunEnd {
+			ends = append(ends, event.RunID)
+		}
+	}
+	if ends[0] != first.ID() || ends[1] != second.RunID {
+		t.Fatalf("Subscribe should hand over every run in order: %v", ends)
+	}
+}
+
+func TestCurrentFindsTheRunInProgress(t *testing.T) {
 	client := newGatedClient(chattest.Say("完成"))
 	r, _ := newRunner(t, client)
-	done := runAsync(r, "s", "开始")
+	if r.Current("s") != nil {
+		t.Fatal("an idle session should have no current run")
+	}
+	started, err := r.Start(bg, "s", Text("开始"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	<-client.started
-	waited := make(chan error, 1)
-	go func() { waited <- r.Wait(bg, "s") }()
-	select {
-	case <-waited:
-		t.Fatal("Wait should not return before the run ends")
-	case <-time.After(20 * time.Millisecond):
+	// A request that knows only the session, such as a reopened page, finds the run and follows it to the end.
+	run := r.Current("s")
+	if run != started {
+		t.Fatal("Current should return the run in progress")
 	}
 	close(client.release)
-	<-done
-	select {
-	case err := <-waited:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Wait did not return after the run ended")
+	var events []Event
+	for event := range run.Events(bg) {
+		events = append(events, event)
+	}
+	result, err := run.Wait(bg)
+	if err != nil || result.Final.Text() != "完成" || events[0].Type != EventRunStart || events[len(events)-1].Type != EventRunEnd {
+		t.Fatalf("the run found by Current should replay from its start: %+v %v", result, err)
+	}
+	if r.Current("s") != nil {
+		t.Fatal("the session should be free once Events and Wait return")
 	}
 }
 
@@ -647,7 +689,7 @@ func TestQueuedMessagesMustConvertToUserMessages(t *testing.T) {
 	r, _ := newRunner(t, client, func(c *Config) { c.Converter = assistantConverter{} })
 	done := runAsync(r, "s", "开始")
 	<-client.started
-	_ = r.Steer("s", Text("转向"))
+	_ = r.Current("s").Steer(Text("转向"))
 	close(client.release)
 	if out := <-done; out.err == nil || !strings.Contains(out.err.Error(), "only user messages are allowed") {
 		t.Fatalf("should fail when the converter turns queued messages into another role: %v", out.err)
@@ -794,8 +836,8 @@ func TestSubAgentRunsInBackground(t *testing.T) {
 	if task, ok := notice.Details.(tool.Task); !ok || task.ID != f.task.ID {
 		t.Fatalf("the result notice should carry the task snapshot: %+v", notice.Details)
 	}
-	if notice.RunID != "" {
-		t.Fatalf("a result notice written to history while idle belongs to no run: %q", notice.RunID)
+	if notice.RunID == "" || notice.RunID == parent[0].RunID {
+		t.Fatalf("a result notice written to history while idle belongs to a short run of its own: %q", notice.RunID)
 	}
 
 	// The full sub-task is stored in a child session of its own (the session ID is the task ID), which records its parent.
@@ -884,8 +926,9 @@ func TestSubAgentResultIsInjectedIntoRunningRun(t *testing.T) {
 		chattest.Gate(mainStarted, mainRelease, chattest.CallTools(chat.ToolCall{ID: "m1", Name: "lookup"})),
 		chattest.Say("看到了结果"),
 	)
+	workerClient := newGatedClient(chattest.Say("子任务的结论"))
 	rec := newTaskRecorder()
-	r, store := newSubAgentRunner(t, mainClient, newClient(chattest.Say("子任务的结论")), rec)
+	r, store := newSubAgentRunner(t, mainClient, workerClient, rec)
 
 	done := make(chan error, 1)
 	go func() {
@@ -894,6 +937,7 @@ func TestSubAgentResultIsInjectedIntoRunningRun(t *testing.T) {
 	}()
 	<-mainStarted
 	// The sub-task ends during the main run's second model call: its result is queued as a notice and injected after this turn's tools finish.
+	close(workerClient.release)
 	waitFor(t, "结果通知排队", func() bool {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -936,7 +980,7 @@ func TestSubAgentOutlivesAbortAndCanBeStopped(t *testing.T) {
 		done <- err
 	}()
 	<-mainStarted
-	r.Abort("parent")
+	r.Current("parent").Abort()
 	if err := <-done; err == nil {
 		t.Fatal("the main run should be canceled")
 	}
@@ -1013,7 +1057,7 @@ func TestFailedSubAgentIsStillRecorded(t *testing.T) {
 		chattest.CallTools(subAgentCall("c1", `{"agent":"worker","task":"会失败的任务"}`)),
 		chattest.Say("已经开始了"),
 	)
-	workerClient := newClient(func(_ context.Context, b *chat.Builder) {
+	workerClient := newGatedClient(func(_ context.Context, b *chat.Builder) {
 		b.TextDelta("做到一半")
 		b.Fail(&chat.Error{Kind: chat.KindServer, Message: "子模型过载"})
 	})
@@ -1022,6 +1066,7 @@ func TestFailedSubAgentIsStillRecorded(t *testing.T) {
 	if _, err := runSync(r, bg, "parent", Text("开始")); err != nil {
 		t.Fatal(err)
 	}
+	close(workerClient.release) // fail only after the main run ended, so the notice is written to history
 	f := rec.wait(t)
 	if f.task.Status != tool.TaskFailed || !strings.Contains(f.task.Error, "子模型过载") || f.task.Result != "做到一半" {
 		t.Fatalf("a failed sub-task should record the reason and the output before the interruption: %+v", f.task)

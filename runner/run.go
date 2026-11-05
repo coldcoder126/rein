@@ -124,61 +124,68 @@ func (run *Run) Events(ctx context.Context) iter.Seq[Event] {
 }
 
 // Subscribe follows a session: it replays the events of the run in progress, if any, from its start, then hands over the events of
-// that run and of every later run of the session as they happen, until ctx is done. While the session is idle it waits for the next run.
+// that run and of every later run of the session in order, until ctx is done. While the session is idle it waits for the next run.
+// No run is missed, even one that starts and ends while the receiver is still busy with the previous one.
 // It suits views that attach to a session at any time, such as a page reopened in the middle of a reply; earlier runs are read from the store.
 func (r *Runner) Subscribe(ctx context.Context, sessionID string) iter.Seq[Event] {
 	return func(yield func(Event) bool) {
-		var last *Run
-		for ctx.Err() == nil {
+		r.mu.Lock()
+		f := r.followers[sessionID]
+		if f == nil {
+			f = &follower{latest: r.active[sessionID]}
+			if f.latest == nil {
+				// A placeholder for the session's last occupation, so that the next run links after it.
+				f.latest = &Run{nextReady: make(chan struct{})}
+			}
+			r.followers[sessionID] = f
+		}
+		f.n++
+		cur := f.latest
+		inProgress := r.active[sessionID] == cur
+		r.mu.Unlock()
+		defer func() {
 			r.mu.Lock()
-			run := r.active[sessionID]
-			if run == nil || run == last {
-				// Wait for the next occupation of the session; the current one, if any, has been followed already.
-				w := r.waiters[sessionID]
-				if w == nil {
-					w = &waiter{ch: make(chan struct{})}
-					r.waiters[sessionID] = w
-				}
-				w.n++
-				r.mu.Unlock()
-				select {
-				case <-w.ch:
-				case <-ctx.Done():
-					r.mu.Lock()
-					if w.n--; w.n == 0 && r.waiters[sessionID] == w {
-						delete(r.waiters, sessionID)
-					}
-					r.mu.Unlock()
-				}
-				continue
+			if f.n--; f.n == 0 {
+				delete(r.followers, sessionID)
 			}
 			r.mu.Unlock()
-			last = run
+		}()
+
+		follow := func(run *Run) bool {
 			for event := range run.Events(ctx) {
 				if !yield(event) {
-					return
+					return false
 				}
+			}
+			return true
+		}
+		if inProgress && !follow(cur) {
+			return
+		}
+		for {
+			select {
+			case <-cur.nextReady:
+			case <-ctx.Done():
+				return
+			}
+			if cur = cur.next; !follow(cur) {
+				return
 			}
 		}
 	}
 }
 
-// waiter wakes the Subscribe calls waiting for the next run of an idle session: ch is closed when the session is occupied again,
-// and n counts the waiters so that the last one to give up removes it.
-type waiter struct {
-	ch chan struct{}
-	n  int
+// follower links the runs of a session while Subscribe calls follow it: latest is the session's most recent occupation, each Run links
+// to the one after it, and n counts the followers so that the last one to leave removes it.
+type follower struct {
+	latest *Run
+	n      int
 }
 
 // process drives one run on the run's goroutine. ctx carries the caller's values without cancellation and is used for the work
 // that must finish anyway; runCtx is canceled by Abort.
 func (r *Runner) process(ctx, runCtx context.Context, run *Run, content []chat.ContentBlock, options runOptions) (*Result, error) {
-	sessionID := run.sessionID
-	info := tool.RunInfo{SessionID: sessionID, RunID: run.id, RootSessionID: sessionID}
-	if parent := options.parent; parent != nil {
-		info.ParentSessionID, info.RootSessionID = parent.SessionID, parent.RootSessionID
-	}
-	st := &runState{r: r, handle: run, info: info, model: r.model(options.model), result: &Result{SessionID: sessionID, RunID: run.id}}
+	st := r.newRunState(run, r.model(options.model), options.parent)
 	st.emit(Event{Type: EventRunStart})
 	err := st.execute(runCtx, content, options)
 
@@ -213,15 +220,42 @@ func (r *Runner) process(ctx, runCtx context.Context, run *Run, content []chat.C
 	return st.result, err
 }
 
+// occupation drives an occupation that does not run the Agent (manual compaction, writing a task result) on the caller's goroutine:
+// it records run_start, does work, ends with run_end and the Result, and frees the session.
+func (r *Runner) occupation(ctx context.Context, run *Run, model chat.Client, work func(st *runState) error) (*Result, error) {
+	st := r.newRunState(run, model, nil)
+	st.emit(Event{Type: EventRunStart})
+	err := work(st)
+	switch {
+	case err == nil:
+		st.result.Status = agent.StatusCompleted
+	case ctx.Err() != nil:
+		st.result.Status = agent.StatusAborted
+	default:
+		st.result.Status = agent.StatusFailed
+	}
+	st.emit(Event{Type: EventRunEnd, Result: st.result})
+	run.result, run.err = st.result, err
+	r.release(run.sessionID, run)
+	return st.result, err
+}
+
+// newRunState creates the state of a run on the given model. A non-nil parent is the run that started it as a sub-task.
+func (r *Runner) newRunState(run *Run, model chat.Client, parent *tool.RunInfo) *runState {
+	info := tool.RunInfo{SessionID: run.sessionID, RunID: run.id, RootSessionID: run.sessionID}
+	if parent != nil {
+		info.ParentSessionID, info.RootSessionID = parent.SessionID, parent.RootSessionID
+	}
+	return &runState{r: r, run: run, info: info, model: model, result: &Result{SessionID: run.sessionID, RunID: run.id}}
+}
+
 // runState is the private state of a run, only accessed on the run's goroutine, so it needs no lock.
 // It connects the Agent run to the session: the callbacks given to the Agent (storing, taking queues, compaction, background tasks) hang off it.
-// The part shared with others is in handle and requires Runner.mu.
+// The part shared with others is in run and requires Runner.mu.
 type runState struct {
-	r      *Runner
-	handle *Run
-	// silent means the occupation records no events (manual compaction).
-	silent bool
-	info   tool.RunInfo
+	r    *Runner
+	run  *Run
+	info tool.RunInfo
 	// model is the model of this run: the one given by WithModel, or Agent.Model.
 	model  chat.Client
 	result *Result
@@ -244,19 +278,15 @@ type injectBatch struct {
 // emit records an event in the run's log for its receivers. When the queues were changed by calls outside the run, a queue_update
 // is recorded first, so every event is recorded in order by the run itself.
 func (st *runState) emit(event Event) {
-	if st.silent {
-		return
-	}
-	h := st.handle
 	st.r.mu.Lock()
 	defer st.r.mu.Unlock()
-	if h.queueChanged {
-		h.queueChanged = false
-		queue := &Queue{Steer: session.CloneMessages(h.steer), FollowUp: session.CloneMessages(h.followUp)}
-		h.record(Event{Type: EventQueueUpdate, SessionID: st.info.SessionID, RunID: st.info.RunID, Queue: queue})
+	if st.run.queueChanged {
+		st.run.queueChanged = false
+		queue := &Queue{Steer: session.CloneMessages(st.run.steer), FollowUp: session.CloneMessages(st.run.followUp)}
+		st.run.record(Event{Type: EventQueueUpdate, SessionID: st.info.SessionID, RunID: st.info.RunID, Queue: queue})
 	}
 	event.SessionID, event.RunID = st.info.SessionID, st.info.RunID
-	h.record(event)
+	st.run.record(event)
 }
 
 // record appends an event to the log and wakes the receivers. Only the latest message_update keeps its message snapshot:
@@ -323,10 +353,10 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 		Middlewares: []agent.Middleware{{WrapTurn: st.wrapTurn}},
 		// Task result notices are taken in two places: those arriving between turns are injected in the next turn, and those arriving when the loop would end make it run one more turn.
 		Steering: func(ctx context.Context) ([]chat.Message, error) {
-			return st.drain(ctx, &st.handle.notices, &st.handle.steer)
+			return st.drain(ctx, &st.run.notices, &st.run.steer)
 		},
 		FollowUp: func(ctx context.Context) ([]chat.Message, error) {
-			return st.drain(ctx, &st.handle.notices, &st.handle.followUp)
+			return st.drain(ctx, &st.run.notices, &st.run.followUp)
 		},
 	}
 
@@ -352,14 +382,14 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 }
 
 // drain takes all messages from the queues in order, converts them into chat messages and records them as a batch for the Agent to inject.
-// The queues point to fields in handle and are read and written while holding Runner.mu.
+// The queues point to fields in run and are read and written while holding Runner.mu.
 func (st *runState) drain(ctx context.Context, queues ...*[]session.Message) ([]chat.Message, error) {
 	st.r.mu.Lock()
 	var messages []session.Message
 	for _, q := range queues {
 		// The notice queue is not part of queue_update, so taking from it does not count as a queue change.
-		if q != &st.handle.notices && len(*q) > 0 {
-			st.handle.queueChanged = true
+		if q != &st.run.notices && len(*q) > 0 {
+			st.run.queueChanged = true
 		}
 		messages = append(messages, *q...)
 		*q = nil
@@ -412,7 +442,7 @@ func (st *runState) handleAgentEvent(ctx context.Context, event agent.Event) err
 						return err
 					}
 					st.r.mu.Lock()
-					st.handle.notifyDelivered(ResultInjectedIntoRun, batch.messages)
+					st.run.notifyDelivered(ResultInjectedIntoRun, batch.messages)
 					st.r.mu.Unlock()
 				}
 				if batch.remaining--; batch.remaining <= 0 {

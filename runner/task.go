@@ -230,7 +230,7 @@ func runSubAgent(ctx context.Context, child *Runner, sessionID string, in agent.
 		return tool.TaskResult{Details: details}, err
 	}
 	// The run does not follow ctx on its own: stopping the task aborts it, and the events are still read to the end.
-	defer context.AfterFunc(ctx, func() { child.Abort(sessionID) })()
+	defer context.AfterFunc(ctx, func() { run.Abort() })()
 	ctx = context.WithoutCancel(ctx)
 	for event := range run.Events(ctx) {
 		if ae := event.AgentEvent; ae != nil {
@@ -274,8 +274,8 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 			// While it is occupied new runs get ErrBusy, and other senders wait for it to be released.
 			hold := r.occupy(sessionID, func() {}, true)
 			r.mu.Unlock()
-			err := r.store.AppendMessages(context.WithoutCancel(ctx), sessionID, msg)
-			r.release(sessionID, hold)
+			ctx := context.WithoutCancel(ctx)
+			_, err := r.occupation(ctx, hold, r.agent.Model, func(st *runState) error { return st.save(ctx, msg) })
 			return ResultSavedToHistory, err
 		case !h.ending:
 			ch := make(chan TaskResultDelivery, 1)
