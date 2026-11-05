@@ -8,7 +8,7 @@ English | [简体中文](README.zh-CN.md)
 
 rein is a Go framework for building LLM agents: the agent loop, tools, sessions and the runtime around them, with Anthropic models as the first-class target.
 
-> **Status:** v0.x. The API may change in incompatible ways before v1. Requires Go 1.25+.
+> **Status:** v0.x. The API may change in incompatible ways before v1. Requires Go 1.26+.
 
 ## Features
 
