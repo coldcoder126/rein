@@ -6,7 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.78.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/openai/openai-go/v3 v3.71.1
+	github.com/openai/openai-go/v3 v3.91.1
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/image v0.47.0
