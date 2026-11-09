@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/coldcoder126/rein/agent"
@@ -25,6 +26,13 @@ type CompactInput struct {
 	Instructions string
 	// Client is the model client of the session, which can be used to generate the summary.
 	Client chat.Client
+	// Continue sends the conversation as the model last saw it, followed by extra, as a side call of the Agent (see agent.SideCall):
+	// the same system prompt, tools, options and messages, through the same middlewares. Summarizing through it reuses the
+	// conversation's prompt cache. The conversation covers Messages up to and including ContinueThrough, so the kept part must
+	// start no later than the message after it. Continue is nil when there is no such conversation, for example when no model call
+	// has succeeded since the last summary.
+	Continue        func(ctx context.Context, extra []chat.Message, opts agent.SideCallOptions) (*chat.Message, error)
+	ContinueThrough string
 }
 
 // CompactReason says how a compaction was triggered.
@@ -68,7 +76,7 @@ const (
 	mediaTokens      = 1500
 )
 
-const defaultSummaryPrompt = `You are summarizing a conversation between a user and an AI assistant so that the assistant can continue the work with only this summary in place of the earlier messages.
+const defaultSummaryPrompt = `Summarize the conversation so far so that the assistant can continue the work with only this summary in place of the earlier messages.
 
 Write a concise but complete summary that preserves:
 - the user's goals, requirements and preferences
@@ -78,6 +86,10 @@ Write a concise but complete summary that preserves:
 
 Write the summary in the language the user has been using. Output only the summary.`
 
+// continueNote is added to the instructions when the summary is asked for within the conversation, where tools are still offered.
+const continueNote = `The most recent messages will stay visible after the summary, so focus on what comes before them.
+Do not call any tools: reply with the summary text only.`
+
 // SummaryCompactor is the default compaction strategy: when context usage exceeds a threshold, it keeps the most recent messages
 // as they are and has the model summarize the earlier part. The cut prefers user messages and never separates a tool call from its result.
 // The zero value works.
@@ -86,12 +98,17 @@ type SummaryCompactor struct {
 	TriggerRatio float64
 	// KeepRatio is the share of the context limit kept as recent messages after compaction, 0.2 by default.
 	KeepRatio float64
-	// Prompt is the system prompt for generating the summary; an empty one uses the built-in prompt.
+	// Prompt is the instruction for generating the summary; an empty one uses the built-in prompt.
 	Prompt string
 	// Client is the model that generates the summary; empty uses the session's model. A cheaper model can be used.
+	//
+	// With the session's model the summary is asked for at the end of the conversation through CompactInput.Continue,
+	// reusing its prompt cache. Otherwise, or when Continue is nil, the messages are sent as a plain text transcript
+	// with Prompt as the system prompt, which no cache covers.
 	Client chat.Client
-	// Options are the parameters of the summary request, passed to the model as is. MaxTokens of 0 becomes 4096;
-	// an empty CacheRetention disables caching, since the summary request's content is used only once.
+	// Options are the parameters of the summary request. MaxTokens of 0 becomes 4096 and applies to both ways; the other
+	// fields only apply to the transcript, as the conversation keeps its own. There an empty CacheRetention disables caching,
+	// since the transcript is used only once.
 	Options chat.Options
 }
 
@@ -108,14 +125,20 @@ func (c SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compac
 		return nil, nil
 	}
 	cut := cutIndex(in.Messages, int(keep*float64(in.MaxInputTokens)), force)
+	conversation := in.Continue != nil && c.Client == nil
+	if conversation {
+		// The summary covers the conversation only up to ContinueThrough; a later cut would drop the messages in between.
+		if i := slices.IndexFunc(in.Messages, func(m session.Message) bool { return m.ID == in.ContinueThrough }); i >= 0 {
+			cut = min(cut, i+1)
+		}
+		for cut > 0 && cut < len(in.Messages) && in.Messages[cut].Type == session.TypeTool {
+			cut--
+		}
+	}
 	if cut <= 0 {
 		return nil, nil
 	}
 
-	client := c.Client
-	if client == nil {
-		client = in.Client
-	}
 	prompt := c.Prompt
 	if prompt == "" {
 		prompt = defaultSummaryPrompt
@@ -127,20 +150,30 @@ func (c SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compac
 	if options.MaxTokens <= 0 {
 		options.MaxTokens = defaultSummaryMaxTokens
 	}
-	if options.CacheRetention == "" {
-		options.CacheRetention = chat.CacheRetentionNone
+	var msg *chat.Message
+	var err error
+	if conversation {
+		msg, err = in.Continue(ctx, []chat.Message{chat.NewUserTextMessage(prompt + "\n\n" + continueNote)}, agent.SideCallOptions{MaxTokens: options.MaxTokens})
+	} else {
+		client := c.Client
+		if client == nil {
+			client = in.Client
+		}
+		if options.CacheRetention == "" {
+			options.CacheRetention = chat.CacheRetentionNone
+		}
+		msg, err = chat.Complete(ctx, client, chat.Request{
+			SystemPrompt: prompt,
+			Options:      options,
+			Messages:     []chat.Message{chat.NewUserTextMessage(transcript(in.Messages[:cut]))},
+		})
 	}
-	msg, err := chat.Complete(ctx, client, chat.Request{
-		SystemPrompt: prompt,
-		Options:      options,
-		Messages:     []chat.Message{chat.NewUserTextMessage(transcript(in.Messages[:cut]))},
-	})
 	if err != nil {
 		return nil, fmt.Errorf("runner: generate summary: %w", err)
 	}
 	summary := strings.TrimSpace(msg.TextContent())
 	if summary == "" {
-		return nil, fmt.Errorf("runner: the model returned an empty summary")
+		return nil, fmt.Errorf("runner: the model returned no summary text")
 	}
 	return &CompactResult{Summary: summary, FirstKeptID: in.Messages[cut].ID, Usage: msg.Usage}, nil
 }
@@ -307,15 +340,34 @@ func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOpti
 	}
 	var summary *session.Message
 	result, err := r.occupation(ctx, run, r.model(opts.Model), func(st *runState) (err error) {
-		summary, err = st.compact(ctx, CompactManual, opts.Instructions)
+		summary, err = st.compact(ctx, CompactManual, opts.Instructions, st.sideCall, false)
 		return err
 	})
 	return summary, result.Usage, err
 }
 
+// sideCaller makes a side call of the Agent with the given messages: agent.SideCall within a run, runState.sideCall outside one.
+type sideCaller func(ctx context.Context, messages []chat.Message, opts agent.SideCallOptions) (*chat.Message, error)
+
+// sideCall makes a side call outside a run, as a run of its own set up like process sets up the Agent, so the system prompt and
+// tools resolve to what the session's next run would see.
+func (st *runState) sideCall(ctx context.Context, messages []chat.Message, opts agent.SideCallOptions) (*chat.Message, error) {
+	a := *st.r.agent
+	a.Middlewares = slices.Concat(st.r.middlewares, a.Middlewares)
+	return a.SideCall(st.services(ctx), agent.Input{RunInfo: st.info, Model: st.model, Messages: messages}, opts)
+}
+
+// summaryReserve is the room left for the summary instructions and output when the summary is asked for at the end of the
+// conversation, at most a tenth of the context.
+const summaryReserve = 8192
+
 // compact compacts the session history when needed and stores the summary, returning the stored summary message, or nil when it did not compact.
 // When the model declares no context limit, only manual compaction happens.
-func (st *runState) compact(ctx context.Context, reason CompactReason, instructions string) (*session.Message, error) {
+//
+// The Compactor gets the conversation to summarize through as a side call made with call. latest asks for the conversation up to the
+// newest message, as the coming turn would send it; otherwise, or when that would not fit, it ends at the last assistant message
+// whose model call succeeded, whose input and output fit within the context and whose input is cached.
+func (st *runState) compact(ctx context.Context, reason CompactReason, instructions string, call sideCaller, latest bool) (*session.Message, error) {
 	r := st.r
 	limit := st.model.Info().MaxInputTokens
 	if r.compactor == nil || (limit <= 0 && reason != CompactManual) {
@@ -326,14 +378,33 @@ func (st *runState) compact(ctx context.Context, reason CompactReason, instructi
 		return nil, err
 	}
 	messages, fresh := effectiveMessages(all)
-	result, err := r.compactor.Compact(ctx, CompactInput{
+	in := CompactInput{
 		Messages:       session.CloneMessages(messages),
 		Tokens:         estimateContext(messages, fresh, r.agent.Instruction),
 		MaxInputTokens: max(limit, 0),
 		Reason:         reason,
 		Instructions:   instructions,
 		Client:         st.model,
-	})
+	}
+	through := len(messages) - 1
+	if !latest || (limit > 0 && in.Tokens+min(summaryReserve, limit/10) > limit) {
+		for through >= 0 && !succeeded(messages[through]) {
+			through--
+		}
+	}
+	if through >= 0 {
+		covered := messages[:through+1]
+		withContext := latest || covered[len(covered)-1].RunID == st.info.RunID
+		in.ContinueThrough = covered[len(covered)-1].ID
+		in.Continue = func(ctx context.Context, extra []chat.Message, opts agent.SideCallOptions) (*chat.Message, error) {
+			conversation, err := st.chatMessages(ctx, covered, withContext)
+			if err != nil {
+				return nil, err
+			}
+			return call(ctx, append(conversation, extra...), opts)
+		}
+	}
+	result, err := r.compactor.Compact(ctx, in)
 	if err != nil || result == nil {
 		return nil, err
 	}
@@ -354,26 +425,38 @@ func (st *runState) compact(ctx context.Context, reason CompactReason, instructi
 	return &saved, nil
 }
 
-// wrapTurn is the per-turn middleware hooked into the Agent, inside the Agent's own middlewares:
-// when a turn fails because the context was exceeded it forces a compaction and lets the loop call the model again with the compacted history,
-// recovering at most once per run; when there are tool results and the run continues it decides whether to compact mid-run.
-func (st *runState) wrapTurn(ctx context.Context, _ agent.TurnInfo, next agent.TurnNext) (*agent.TurnResult, error) {
-	result, err := next(ctx)
+// succeeded reports whether msg is an assistant message whose model call succeeded.
+func succeeded(msg session.Message) bool {
+	stop := msg.ChatMessage.StopReason
+	return msg.Type == session.TypeAssistant && stop != chat.StopReasonError && stop != chat.StopReasonAborted
+}
+
+// wrapTurn is the per-turn middleware hooked into the Agent, inside the Agent's own middlewares.
+// Before each turn it decides whether to compact, and replaces the history the turn uses when it does; the first turn asks for the
+// conversation up to the previous run, as cached by it, and later turns for the conversation so far.
+// When a turn fails because the context was exceeded it forces a compaction and lets the loop call the model again with the
+// compacted history, recovering at most once per run.
+func (st *runState) wrapTurn(ctx context.Context, info agent.TurnInfo, next agent.TurnNext) (*agent.TurnResult, error) {
+	summary, err := st.compact(ctx, CompactAuto, "", agent.SideCall, info.TurnIndex > 0)
 	if err != nil {
+		return nil, err
+	}
+	if summary != nil {
+		messages, err := st.buildMessages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := agent.SetMessages(ctx, messages); err != nil {
+			return nil, err
+		}
+	}
+	result, err := next(ctx)
+	if err != nil || result.Status != agent.StatusFailed || result.Turn.Message.ErrorKind != chat.KindContextLength || st.recovered {
 		return result, err
 	}
-	reason := CompactAuto
-	switch {
-	case result.Status == agent.StatusFailed && result.Turn.Message.ErrorKind == chat.KindContextLength && !st.recovered:
-		// The failed assistant message is already stored and is excluded on replay.
-		st.recovered = true
-		reason = CompactOverflow
-	case result.Status != "" || len(result.Turn.ToolResults) == 0:
-		// The run is about to end; leave it to the start of the next run.
-		return result, nil
-	}
-	summary, err := st.compact(ctx, reason, "")
-	if err != nil || summary == nil {
+	// The failed assistant message is already stored and is excluded on replay.
+	st.recovered = true
+	if summary, err = st.compact(ctx, CompactOverflow, "", agent.SideCall, false); err != nil || summary == nil {
 		return result, err
 	}
 	if result.Messages, err = st.buildMessages(ctx); err != nil {

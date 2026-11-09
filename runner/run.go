@@ -262,8 +262,10 @@ type runState struct {
 	// batches are messages taken from the queues and waiting for the Agent to inject them. They are stored only when actually injected,
 	// so messages that were canceled or never injected because the turns ran out do not enter history.
 	batches []injectBatch
-	// runContext is the run-scoped context of this run, merged again whenever the history is rebuilt mid-run.
-	runContext []session.Message
+	// runContext is the run-scoped context of this run, merged again whenever the history is rebuilt mid-run,
+	// before the message with the ID contextBefore (see mergeRunContext).
+	runContext    []session.Message
+	contextBefore string
 	// recovered means this run has already recovered from one context overflow; another overflow is not compacted and retried.
 	recovered bool
 }
@@ -338,11 +340,8 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 	if err := st.save(ctx, initial...); err != nil {
 		return err
 	}
-	if _, err := st.compact(ctx, CompactAuto, ""); err != nil {
-		return err
-	}
 
-	// Middlewares from outside in: the runtime's, the Agent's own, and this run's history compaction.
+	// Middlewares from outside in: the runtime's, the Agent's own, and this run's history compaction, which also checks before the first turn.
 	// The Agent definition is shared, so the runtime middlewares are attached to a copy.
 	a := *r.agent
 	a.Middlewares = slices.Concat(r.middlewares, a.Middlewares)
@@ -360,14 +359,7 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 		},
 	}
 
-	// Background tasks spawned by the main run are executed by the Runner, and each sub-agent task runs in a session of its own.
-	// Sub-tasks cannot spawn background tasks: their ctx inherits from the parent run, so the parent session's task manager must be removed explicitly.
-	if options.parent == nil {
-		ctx = tool.WithTaskManager(ctx, sessionTaskManager{r, st.info.SessionID})
-		ctx = agent.WithSubAgentExecutor(ctx, subAgentExecutor{r})
-	} else {
-		ctx = tool.WithTaskManager(ctx, nil)
-	}
+	ctx = st.services(ctx)
 	messages, err := st.buildMessages(ctx)
 	if err != nil {
 		return err
@@ -455,6 +447,17 @@ func (st *runState) handleAgentEvent(ctx context.Context, event agent.Event) err
 	return nil
 }
 
+// services adds what the Runner provides to the Agent through ctx. Background tasks spawned by the main run are executed by the Runner,
+// and each sub-agent task runs in a session of its own. Sub-tasks cannot spawn background tasks: their ctx inherits from the parent run,
+// so the parent session's task manager must be removed explicitly.
+func (st *runState) services(ctx context.Context) context.Context {
+	if st.info.ParentSessionID != "" {
+		return tool.WithTaskManager(ctx, nil)
+	}
+	ctx = tool.WithTaskManager(ctx, sessionTaskManager{st.r, st.info.SessionID})
+	return agent.WithSubAgentExecutor(ctx, subAgentExecutor{st.r})
+}
+
 // buildMessages loads the history from the store and converts it into model-visible messages, applying the latest summary and merging this run's context.
 func (st *runState) buildMessages(ctx context.Context) ([]chat.Message, error) {
 	all, err := st.r.store.ListMessages(ctx, st.info.SessionID)
@@ -462,7 +465,15 @@ func (st *runState) buildMessages(ctx context.Context) ([]chat.Message, error) {
 		return nil, err
 	}
 	messages, _ := effectiveMessages(all)
-	messages = mergeRunContext(messages, st.runContext)
+	return st.chatMessages(ctx, messages, true)
+}
+
+// chatMessages converts effective session messages into model-visible messages, merging this run's context when withContext is set.
+// The same messages always convert to the same result, so a conversation rebuilt from the store matches what the model was sent.
+func (st *runState) chatMessages(ctx context.Context, messages []session.Message, withContext bool) ([]chat.Message, error) {
+	if withContext {
+		messages = st.mergeRunContext(messages)
+	}
 	out, err := st.r.converter.ToChatMessages(ctx, messages)
 	if err != nil {
 		return nil, err
@@ -479,21 +490,35 @@ func (st *runState) buildMessages(ctx context.Context) ([]chat.Message, error) {
 	return out, nil
 }
 
-// mergeRunContext inserts the run-scoped context before the last user message, so it merges with the user input into one model message.
-func mergeRunContext(messages, runContext []session.Message) []session.Message {
-	if len(runContext) == 0 {
+// mergeRunContext inserts the run-scoped context where the run first placed it: before the last user message when the run started,
+// so it merges with the user input into one model message. Later rebuilds keep that place even after steering adds user messages;
+// when compaction has summarized that message away, the context goes right after the summary.
+func (st *runState) mergeRunContext(messages []session.Message) []session.Message {
+	if len(st.runContext) == 0 {
 		return messages
 	}
-	insertAt := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Type == session.TypeUser {
-			insertAt = i
-			break
+	insertAt := -1
+	if st.contextBefore == "" {
+		insertAt = len(messages)
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Type == session.TypeUser {
+				insertAt = i
+				st.contextBefore = messages[i].ID
+				break
+			}
+		}
+	} else {
+		insertAt = slices.IndexFunc(messages, func(m session.Message) bool { return m.ID == st.contextBefore })
+	}
+	if insertAt < 0 {
+		insertAt = 0
+		if len(messages) > 0 && messages[0].Type == session.TypeSummary {
+			insertAt = 1
 		}
 	}
-	out := make([]session.Message, 0, len(messages)+len(runContext))
+	out := make([]session.Message, 0, len(messages)+len(st.runContext))
 	out = append(out, messages[:insertAt]...)
-	out = append(out, session.CloneMessages(runContext)...)
+	out = append(out, session.CloneMessages(st.runContext)...)
 	return append(out, messages[insertAt:]...)
 }
 

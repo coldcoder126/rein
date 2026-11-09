@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -83,11 +84,13 @@ func TestCompactionBeforeRun(t *testing.T) {
 
 	requests := client.Requests()
 	summaryReq := requests[2]
-	if summaryReq.Options.MaxTokens != 4096 || summaryReq.Options.CacheRetention != chat.CacheRetentionNone {
-		t.Fatalf("the summary request should limit output and not cache by default: %+v", summaryReq.Options)
+	if summaryReq.Options.MaxTokens != 4096 || summaryReq.Options.CacheRetention != requests[1].Options.CacheRetention {
+		t.Fatalf("the summary request should limit output and keep the conversation's options: %+v", summaryReq.Options)
 	}
-	if len(summaryReq.Tools) != 0 || !strings.Contains(summaryReq.Messages[0].TextContent(), "问题一") || strings.Contains(summaryReq.Messages[0].TextContent(), "问题三") {
-		t.Fatalf("the summary request should only contain the old messages being summarized: %s", summaryReq.Messages[0].TextContent())
+	// Before the first turn, the summary continues the conversation as the previous run left it, without the new input.
+	assertContinues(t, summaryReq, requests[1], "回答二")
+	if strings.Contains(requestText(summaryReq), "问题三") {
+		t.Fatalf("the summary request should not include the new input: %s", requestText(summaryReq))
 	}
 	got := requestText(requests[3])
 	if !strings.Contains(got, "<conversation_summary>\n这是摘要\n</conversation_summary>") || strings.Contains(got, "问题一") || !strings.HasSuffix(got, long("问题三")) {
@@ -114,10 +117,35 @@ func TestCompactionBeforeRun(t *testing.T) {
 	}
 }
 
+// assertContinues checks that the summary request continues the conversation of prev: the same system prompt, tools and
+// options except MaxTokens, prev's messages followed by the given messages (the reply to prev and anything after it, by text),
+// and the summary instructions at the end.
+func assertContinues(t *testing.T, summaryReq, prev chat.Request, then ...string) {
+	t.Helper()
+	got, want := summaryReq, prev
+	got.MaxTokens, want.MaxTokens = 0, 0
+	got.Messages, want.Messages, got.Metadata, want.Metadata = nil, nil, nil, nil
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the summary request should keep the conversation's system prompt, tools and options:\n%+v\n%+v", got, want)
+	}
+	n := len(prev.Messages)
+	if len(summaryReq.Messages) != n+len(then)+1 || !reflect.DeepEqual(summaryReq.Messages[:n], prev.Messages) {
+		t.Fatalf("the summary request should start with the previous request's messages: %s", requestText(summaryReq))
+	}
+	for i, text := range then {
+		if got := summaryReq.Messages[n+i].TextContent(); got != text {
+			t.Fatalf("message %d of the summary request should be %q: %q", n+i, text, got)
+		}
+	}
+	if last := summaryReq.Messages[len(summaryReq.Messages)-1]; last.Role != chat.RoleUser || !strings.Contains(last.TextContent(), "Do not call any tools") {
+		t.Fatalf("the summary request should end with the summary instructions: %q", last.TextContent())
+	}
+}
+
 func TestCompactionMidRun(t *testing.T) {
 	h, client, _ := compactRunner(t, 1000,
 		sayWithUsage("回答一", 100),
-		callWithUsage(950), // usage exceeds the threshold after this turn
+		callWithUsage(850), // usage exceeds the threshold after this turn
 		chattest.Say("运行中途的摘要"),
 		sayWithUsage("最终回答", 200),
 	)
@@ -127,11 +155,13 @@ func TestCompactionMidRun(t *testing.T) {
 	if len(requests) != 4 || result.Final.Text() != "最终回答" {
 		t.Fatalf("should compact mid-run and continue: %d %q", len(requests), result.Final.Text())
 	}
+	// Mid-run, the summary continues the conversation as the next turn would send it: the tool call and its result included.
+	assertContinues(t, requests[2], requests[1], "", "工具结果")
 	got := requestText(requests[3])
 	if !strings.Contains(got, "运行中途的摘要") || strings.Contains(got, "问题一") || !strings.HasSuffix(got, "tool:工具结果") {
 		t.Fatalf("the next request after compaction should use the new context and keep the recent tool result: %s", got)
 	}
-	if result.Usage.TotalTokens != 950+200 {
+	if result.Usage.TotalTokens != 850+200 {
 		t.Fatalf("usage should accumulate: %+v", result.Usage)
 	}
 }
@@ -163,6 +193,8 @@ func TestCompactionOnOverflowRetriesOnce(t *testing.T) {
 	if starts != 1 || !slices.Equal(turns, []int{0, 1}) {
 		t.Fatalf("recovery should happen within the same Agent run, with consecutive turn numbers: starts=%d turns=%v", starts, turns)
 	}
+	// On overflow, the summary continues the conversation up to the last successful reply, which is known to fit.
+	assertContinues(t, client.Requests()[3], client.Requests()[1], "回答二")
 	if got := requestText(client.Requests()[4]); !strings.Contains(got, "超限后的摘要") || !strings.HasSuffix(got, "问题三") {
 		t.Fatalf("the retried request should use the compacted context: %s", got)
 	}
@@ -186,9 +218,11 @@ func TestManualCompaction(t *testing.T) {
 	if err != nil || usage.TotalTokens != 42 || summary == nil || summary.Type != session.TypeSummary || summary.Text() != "手动摘要" || summary.FirstKeptID == "" {
 		t.Fatalf("should generate and return the stored summary and its usage: %+v %+v %v", summary, usage, err)
 	}
+	// Manual compaction continues the conversation as the next run would see it.
 	summaryReq := client.Requests()[2]
-	if !strings.Contains(summaryReq.SystemPrompt, "重点保留数字") || !strings.Contains(summaryReq.Messages[0].TextContent(), "问题一") || strings.Contains(summaryReq.Messages[0].TextContent(), "问题二") {
-		t.Fatalf("the summary request should carry the extra requirements and keep the recent messages: %s | %s", summaryReq.SystemPrompt, summaryReq.Messages[0].TextContent())
+	assertContinues(t, summaryReq, client.Requests()[1], "回答二")
+	if last := summaryReq.Messages[len(summaryReq.Messages)-1].TextContent(); !strings.Contains(last, "重点保留数字") {
+		t.Fatalf("the summary instructions should carry the extra requirements: %s", last)
 	}
 	all, _ := store.ListMessages(bg, "c")
 	if last := all[len(all)-1]; last.ID != summary.ID || summary.RunID == "" || summary.RunID == all[0].RunID {
@@ -204,20 +238,31 @@ func TestManualCompaction(t *testing.T) {
 		t.Fatalf("should return ErrBusy while the session is running: %v", err)
 	}
 	h.release("c", busy)
-	// Custom summary request parameters are used as is.
-	custom := newClient(chattest.Say("回答"), chattest.Say("回答"), chattest.Say("摘要"))
+	// Within the conversation only MaxTokens applies; a separate summary model gets a transcript with every configured parameter.
 	options := chat.Options{MaxTokens: 100, CacheRetention: chat.CacheRetentionShort, Reasoning: chat.ReasoningLow}
-	r, _ := newRunner(t, custom, func(cfg *Config) { cfg.Compactor = SummaryCompactor{Options: options} })
-	for range 2 {
-		if _, err := runSync(r, bg, "c", Text("问题")); err != nil {
+	summarizer := newClient(chattest.Say("摘要"))
+	for _, c := range []SummaryCompactor{{Options: options}, {Options: options, Client: summarizer}} {
+		custom := newClient(chattest.Say("回答"), chattest.Say("回答"), chattest.Say("摘要"))
+		r, _ := newRunner(t, custom, func(cfg *Config) { cfg.Compactor = c })
+		for range 2 {
+			if _, err := runSync(r, bg, "c", Text("问题")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, _, err := r.Compact(bg, "c", CompactOptions{}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if _, _, err := r.Compact(bg, "c", CompactOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := custom.Requests()[2].Options; got.MaxTokens != 100 || got.CacheRetention != chat.CacheRetentionShort || got.Reasoning != chat.ReasoningLow {
-		t.Fatalf("the summary request should use the configured parameters: %+v", got)
+		if c.Client == nil {
+			if got := custom.Requests()[2].Options; got.MaxTokens != 100 || got.CacheRetention != "" || got.Reasoning != "" {
+				t.Fatalf("within the conversation the summary request should only change MaxTokens: %+v", got)
+			}
+			continue
+		}
+		got := summarizer.Requests()[0]
+		if len(custom.Requests()) != 2 || got.MaxTokens != 100 || got.CacheRetention != chat.CacheRetentionShort || got.Reasoning != chat.ReasoningLow ||
+			got.SystemPrompt != defaultSummaryPrompt || !strings.Contains(got.Messages[0].TextContent(), "<conversation>") {
+			t.Fatalf("a separate summary model should get a transcript with the configured parameters: %+v", got)
+		}
 	}
 
 	off, _ := newRunner(t, newClient(), func(cfg *Config) { cfg.DisableCompaction = true })
@@ -280,6 +325,77 @@ func TestManualCompactionIsARun(t *testing.T) {
 	}
 	if res := end.Result; res.Status != agent.StatusCompleted || len(res.Messages) != 1 || res.Messages[0].ID != summary.ID || res.RunID != summary.RunID {
 		t.Fatalf("manual compaction should end with a Result holding the summary: %+v", res)
+	}
+}
+
+func TestCompactionContinuesWithRunContextSteeringAndRewrites(t *testing.T) {
+	var sideCalls []bool
+	var h *Runner
+	var steer bool
+	client := newClient(
+		sayWithUsage("回答一", 100),
+		callWithUsage(300), callWithUsage(850), // the second call brings usage over the threshold
+		chattest.Say("中途摘要"),
+		sayWithUsage("最终回答", 100),
+	)
+	client.Model.MaxInputTokens = 1000
+	h, _ = newRunner(t, client, func(cfg *Config) {
+		cfg.Middlewares = []agent.Middleware{
+			// A runtime middleware that rewrites every request: the summary must see the same rewrite.
+			agent.BeforeModel(func(_ context.Context, turn agent.TurnInfo, req *chat.Request) error {
+				sideCalls = append(sideCalls, turn.SideCall)
+				req.SystemPrompt += "（动态）"
+				req.Tools = append(req.Tools, chat.ToolDef{Name: "dynamic", InputSchema: []byte(`{"type":"object"}`)})
+				return nil
+			}),
+			{WrapTurn: func(ctx context.Context, turn agent.TurnInfo, next agent.TurnNext) (*agent.TurnResult, error) {
+				result, err := next(ctx)
+				if steer && turn.TurnIndex == 0 {
+					_ = h.Current("c").Steer(Text("补充说明"))
+				}
+				return result, err
+			}},
+		}
+	})
+	submit(t, h, long("问题一"))
+	steer = true
+	result, err := runSync(h, bg, "c", Text(long("问题二")), WithContext(ContextInput{Text: "页面：设置"}))
+	if err != nil || result.Final.Text() != "最终回答" {
+		t.Fatalf("should compact mid-run and finish: %v %+v", err, result)
+	}
+	requests := client.Requests()
+	if got := requestText(requests[2]); !strings.Contains(got, "页面：设置") || !strings.Contains(got, "补充说明") {
+		t.Fatalf("the turn before compaction should carry the run context and the steering message: %s", got)
+	}
+	// The conversation rebuilt from the store matches the request the turn sent, run context and steering in place.
+	assertContinues(t, requests[3], requests[2], "", "工具结果")
+	if !slices.Equal(sideCalls, []bool{false, false, false, true, false}) {
+		t.Fatalf("only the summary should be a side call: %v", sideCalls)
+	}
+	if got := requestText(requests[4]); !strings.Contains(got, "中途摘要") || !strings.Contains(got, "页面：设置") {
+		t.Fatalf("the run context should stay after compaction: %s", got)
+	}
+}
+
+func TestSummaryCompactorFallsBackToTranscript(t *testing.T) {
+	messages := []session.Message{
+		{ID: "u1", Type: session.TypeUser, ChatMessage: chat.NewUserTextMessage(long("问题一"))},
+		{ID: "a1", Type: session.TypeAssistant, ChatMessage: chat.Message{Role: chat.RoleAssistant, Content: []chat.ContentBlock{chat.Text("回答一")}}},
+		{ID: "u2", Type: session.TypeUser, ChatMessage: chat.NewUserTextMessage(long("问题二"))},
+	}
+	client := newClient(chattest.Say("纯文本摘要"))
+	in := CompactInput{Messages: messages, Reason: CompactManual, Client: client}
+	result, err := SummaryCompactor{}.Compact(bg, in)
+	if err != nil || result.Summary != "纯文本摘要" || !strings.Contains(client.Requests()[0].Messages[0].TextContent(), "<conversation>") {
+		t.Fatalf("without Continue the summary should come from a transcript: %+v %v", result, err)
+	}
+
+	in.ContinueThrough = "a1"
+	in.Continue = func(context.Context, []chat.Message, agent.SideCallOptions) (*chat.Message, error) {
+		return &chat.Message{Role: chat.RoleAssistant, Content: []chat.ContentBlock{{Type: chat.ContentTypeToolCall, ToolCall: &chat.ToolCall{ID: "1", Name: "lookup"}}}}, nil
+	}
+	if _, err := (SummaryCompactor{}).Compact(bg, in); err == nil || !strings.Contains(err.Error(), "no summary text") {
+		t.Fatalf("a reply with only tool calls should fail: %v", err)
 	}
 }
 
