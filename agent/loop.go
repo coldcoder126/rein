@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coldcoder126/rein/chat"
@@ -22,6 +23,24 @@ import (
 // cancellation returns the ctx error, and reaching the turn limit returns ErrMaxTurnsExceeded; in these three cases Result is still valid
 // and contains the messages produced so far. Result may be nil for invalid input, or when a toolset, middleware or event handler fails.
 func (a *Agent) Run(ctx context.Context, in Input) (*Result, error) {
+	l, err := a.newLoop(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, loopKey{}, l)
+	return chainRun(l.middlewares, l.in.RunInfo, func(ctx context.Context) (*Result, error) {
+		if err := l.resolve(ctx); err != nil {
+			return nil, err
+		}
+		if err := l.run(ctx); err != nil {
+			return l.result, err
+		}
+		return l.result, statusError(ctx, l.result)
+	})(ctx)
+}
+
+// newLoop validates the input and sets up the state of a run, shared by Run and SideCall.
+func (a *Agent) newLoop(ctx context.Context, in Input) (*loop, error) {
 	if a.Model == nil && in.Model == nil {
 		return nil, errors.New("agent: Model must not be nil")
 	}
@@ -45,16 +64,7 @@ func (a *Agent) Run(ctx context.Context, in Input) (*Result, error) {
 	l.agent.applyDefaults()
 	l.middlewares = slices.Concat(a.Middlewares, in.Middlewares)
 	l.serializeEmit()
-	ctx = context.WithValue(ctx, loopKey{}, l)
-	return chainRun(l.middlewares, in.RunInfo, func(ctx context.Context) (*Result, error) {
-		if err := l.resolve(ctx); err != nil {
-			return nil, err
-		}
-		if err := l.run(ctx); err != nil {
-			return l.result, err
-		}
-		return l.result, statusError(ctx, l.result)
-	})(ctx)
+	return l, nil
 }
 
 // loopKey is the ctx key of the current run; the sub-agent tool uses it to find the main Agent that made the call.
@@ -101,6 +111,9 @@ type loop struct {
 	instruction string
 	tools       []tool.Tool
 	messages    []chat.Message
+	// beforeTurn is set while WrapTurn runs before calling next, the only time SetMessages may replace messages.
+	// It is atomic because the loop is reachable from tool goroutines through ctx.
+	beforeTurn atomic.Bool
 
 	result *Result
 	start  time.Time
@@ -202,7 +215,9 @@ func (l *loop) run(ctx context.Context) error {
 func (l *loop) turn(ctx context.Context, pending []chat.Message) (status Status, more bool, err error) {
 	info := TurnInfo{RunInfo: l.in.RunInfo, TurnIndex: l.result.Turns}
 	called, failed := false, false
+	l.beforeTurn.Store(true)
 	result, err := chainTurn(l.middlewares, info, func(ctx context.Context) (*TurnResult, error) {
+		l.beforeTurn.Store(false)
 		if called {
 			return nil, errors.New("agent: a turn can only run once")
 		}
@@ -213,6 +228,7 @@ func (l *loop) turn(ctx context.Context, pending []chat.Message) (status Status,
 		}
 		return result, err
 	})(ctx)
+	l.beforeTurn.Store(false)
 	if err != nil {
 		return "", false, err
 	}
@@ -299,20 +315,7 @@ func (l *loop) emitMessage(ctx context.Context, turnIndex int, msg chat.Message)
 // streamAssistant calls the model once through WrapModel and returns the assistant message and the names of the tools actually offered to the model.
 func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message, map[string]bool, error) {
 	turnIndex := info.TurnIndex
-	req := chat.Request{
-		Options:      l.agent.Options,
-		SystemPrompt: l.instruction,
-		Messages:     slices.Clone(l.messages),
-		Tools:        make([]chat.ToolDef, 0, len(l.tools)),
-	}
-	for _, t := range l.tools {
-		req.Tools = append(req.Tools, t.Def())
-	}
-	req.Metadata = maps.Clone(req.Metadata)
-	if req.Metadata == nil {
-		req.Metadata = make(map[string]string, 1)
-	}
-	req.Metadata["turn_index"] = strconv.Itoa(turnIndex)
+	req := l.request(turnIndex, l.messages)
 
 	// Middlewares may rewrite the request's tools; the last request actually sent to the model wins, and the original request's tools apply when the model was not called.
 	offered := toolNames(req.Tools)
@@ -347,6 +350,26 @@ func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message
 		return chat.Message{}, nil, errors.New("agent: model stream ended before a terminal event")
 	}
 	return *final, offered, nil
+}
+
+// request builds the model request of a turn from the resolved system prompt and tools; turns and side calls share it,
+// so a side call sends exactly what a turn would.
+func (l *loop) request(turnIndex int, messages []chat.Message) chat.Request {
+	req := chat.Request{
+		Options:      l.agent.Options,
+		SystemPrompt: l.instruction,
+		Messages:     slices.Clone(messages),
+		Tools:        make([]chat.ToolDef, 0, len(l.tools)),
+	}
+	for _, t := range l.tools {
+		req.Tools = append(req.Tools, t.Def())
+	}
+	req.Metadata = maps.Clone(req.Metadata)
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]string, 1)
+	}
+	req.Metadata["turn_index"] = strconv.Itoa(turnIndex)
+	return req
 }
 
 func toolNames(defs []chat.ToolDef) map[string]bool {

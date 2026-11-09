@@ -18,11 +18,13 @@ type Middleware struct {
 	WrapRun func(ctx context.Context, info tool.RunInfo, next RunNext) (*Result, error)
 	// WrapTurn wraps a turn: injecting pending messages, calling the model, executing tools. See TurnResult.
 	// next may be called at most once; when it is not called the turn does not run and the returned result goes straight to the outer layer.
+	// Before calling next, SetMessages can replace the history the turn uses.
 	WrapTurn func(ctx context.Context, turn TurnInfo, next TurnNext) (*TurnResult, error)
 	// WrapModel wraps a model call: it can rewrite the request, observe or rewrite events, or call next zero or several times.
 	// The returned sequence must honor the chat.Client.Stream contract. req.Messages is a copy that can be changed directly.
 	// The tools callable in this turn are those in the request of the last call to next; tools not offered are not executed even if called.
 	// Extensions at the model call level that are unrelated to the run (retries, rate limiting, usage) wrap Model with chat.Chain.
+	// It also wraps side calls (turn.SideCall), whose requests should pass through unchanged; see SideCall.
 	WrapModel func(ctx context.Context, turn TurnInfo, req chat.Request, next chat.StreamFunc) iter.Seq[chat.Event]
 	// WrapTool wraps a tool execution; see WrapToolFunc.
 	WrapTool WrapToolFunc

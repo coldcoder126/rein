@@ -91,6 +91,9 @@ type Input struct {
 type TurnInfo struct {
 	tool.RunInfo
 	TurnIndex int
+	// SideCall marks a model call that is not a turn but a side call (see SideCall); TurnIndex is then the turn about to run.
+	// It is for observation (logging, usage); the request should be left unchanged.
+	SideCall bool
 }
 
 // TurnResult is the result of a turn. WrapTurn may change Status and Messages before passing it outward, and the loop continues from the outermost result.

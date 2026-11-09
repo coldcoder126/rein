@@ -1217,3 +1217,97 @@ func TestEventDeltaAccessors(t *testing.T) {
 		t.Fatalf("delta accessors should only return content on the matching events: %q %q", text, thinking)
 	}
 }
+
+func TestSideCallSendsWhatATurnWouldSend(t *testing.T) {
+	client := chattest.NewClient(chattest.CallTools(call("1", "t", "")), chattest.Say("旁路回复"), chattest.Say("完成"))
+	var sideCalls []bool
+	var sideReply *chat.Message
+	var setLate, fromTool error
+	a := &Agent{
+		Model:   client,
+		Options: chat.Options{MaxTokens: 1000},
+		Tools: []tool.Tool{stubTool{name: "t", run: func(ctx *tool.Context, _ json.RawMessage) (*tool.Result, error) {
+			fromTool = SetMessages(ctx, user("x"))
+			return tool.Text("t result"), nil
+		}}},
+		Middlewares: []Middleware{
+			BeforeModel(func(_ context.Context, turn TurnInfo, req *chat.Request) error {
+				sideCalls = append(sideCalls, turn.SideCall)
+				req.Tools = append(req.Tools, chat.ToolDef{Name: "dynamic", InputSchema: json.RawMessage(`{"type":"object"}`)})
+				return nil
+			}),
+			{WrapTurn: func(ctx context.Context, turn TurnInfo, next TurnNext) (*TurnResult, error) {
+				if turn.TurnIndex == 1 {
+					var err error
+					if sideReply, err = SideCall(ctx, append(user("开始"), chat.NewUserTextMessage("总结一下")), SideCallOptions{MaxTokens: 7}); err != nil {
+						return nil, err
+					}
+					if err := SetMessages(ctx, user("摘要")); err != nil {
+						return nil, err
+					}
+				}
+				result, err := next(ctx)
+				setLate = SetMessages(ctx, user("太晚了"))
+				return result, err
+			}},
+		},
+	}
+	var ends int
+	result, err := a.Run(context.Background(), Input{Messages: user("开始"), Emit: func(_ context.Context, e Event) error {
+		if e.Type == EventMessageEnd && e.Message.Role == chat.RoleAssistant {
+			ends++
+		}
+		return nil
+	}})
+	if err != nil || result.Status != StatusCompleted || result.Turns != 2 || ends != 2 {
+		t.Fatalf("a side call should not count as a turn or emit events: %+v %v ends=%d", result, err, ends)
+	}
+	if sideReply == nil || sideReply.TextContent() != "旁路回复" || !slices.Equal(sideCalls, []bool{false, true, false}) {
+		t.Fatalf("the side call should go through WrapModel marked as a side call: %v %v", sideReply, sideCalls)
+	}
+	requests := client.Requests()
+	first, side := requests[0], requests[1]
+	if side.MaxTokens != 7 || side.SystemPrompt != first.SystemPrompt || !slices.EqualFunc(side.Tools, first.Tools, func(a, b chat.ToolDef) bool { return a.Name == b.Name }) ||
+		len(side.Tools) != 2 || roles(side.Messages) != "user,user" {
+		t.Fatalf("the side call should send a turn's request with its own messages and MaxTokens: %+v", side)
+	}
+	if got := requests[2].Messages[0].TextContent(); got != "摘要" || roles(requests[2].Messages) != "user" {
+		t.Fatalf("SetMessages before next should replace the history of the turn: %s", roles(requests[2].Messages))
+	}
+	if setLate == nil || fromTool == nil {
+		t.Fatalf("SetMessages should fail after next and outside WrapTurn: %v %v", setLate, fromTool)
+	}
+	if _, err := SideCall(context.Background(), user("x"), SideCallOptions{}); err == nil {
+		t.Fatal("SideCall outside a run should fail")
+	}
+}
+
+func TestAgentSideCallIsARunOfItsOwn(t *testing.T) {
+	client := chattest.NewClient(chattest.Say("回复"))
+	var order []string
+	a := &Agent{Model: client, Instruction: "系统", Middlewares: []Middleware{{
+		WrapRun: func(ctx context.Context, _ tool.RunInfo, next RunNext) (*Result, error) {
+			order = append(order, "run")
+			result, err := next(ctx)
+			if result == nil || result.Final == nil || result.Status != StatusCompleted {
+				t.Errorf("WrapRun should see the side call's result: %+v", result)
+			}
+			return result, err
+		},
+		WrapTurn: func(ctx context.Context, _ TurnInfo, next TurnNext) (*TurnResult, error) {
+			order = append(order, "turn")
+			return next(ctx)
+		},
+		WrapModel: func(ctx context.Context, turn TurnInfo, req chat.Request, next chat.StreamFunc) iter.Seq[chat.Event] {
+			order = append(order, fmt.Sprintf("model:%v", turn.SideCall))
+			return next(ctx, req)
+		},
+	}}}
+	msg, err := a.SideCall(context.Background(), Input{Messages: user("问")}, SideCallOptions{})
+	if err != nil || msg.TextContent() != "回复" || strings.Join(order, ",") != "run,model:true" {
+		t.Fatalf("a side call outside a run should go through WrapRun and WrapModel only: %v %v %v", msg, err, order)
+	}
+	if req := client.Requests()[0]; req.SystemPrompt != "系统" {
+		t.Fatalf("the side call should resolve the system prompt: %q", req.SystemPrompt)
+	}
+}
