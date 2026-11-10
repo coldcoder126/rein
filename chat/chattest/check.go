@@ -57,15 +57,19 @@ func CheckStream(events []chat.Event) error {
 			}
 			openType, openIndex = e.Type, e.Index
 			nextIndex++
-		case chat.EventImage:
+		case chat.EventImage, chat.EventServerTool:
 			if openType != "" {
-				return fmt.Errorf("event %d: image while block %d is still open", i, openIndex)
+				return fmt.Errorf("event %d: %s while block %d is still open", i, e.Type, openIndex)
 			}
 			if e.Index != nextIndex {
 				return fmt.Errorf("event %d: block index should be %d, got=%d", i, nextIndex, e.Index)
 			}
-			if e.Index >= len(e.Message.Content) || e.Message.Content[e.Index].Type != chat.ContentTypeMedia {
-				return fmt.Errorf("event %d: the block of the image event is not an image", i)
+			want := chat.ContentTypeMedia
+			if e.Type == chat.EventServerTool {
+				want = chat.ContentTypeServerTool
+			}
+			if e.Index >= len(e.Message.Content) || e.Message.Content[e.Index].Type != want {
+				return fmt.Errorf("event %d: the block of the %s event is not a %s block", i, e.Type, want)
 			}
 			nextIndex++
 		case chat.EventTextDelta:

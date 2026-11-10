@@ -61,6 +61,12 @@ func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.timeout = d }
 }
 
+// WithDeferLoading marks every tool of the server as deferred (see chat.ToolDef.Deferred): the model finds them through
+// the provider's tool search instead of seeing them all up front. Suited to servers with many tools.
+func WithDeferLoading() Option {
+	return func(c *Client) { c.deferLoading = true }
+}
+
 // WithoutInstructions stops the server's instructions from being appended to the system prompt.
 func WithoutInstructions() Option {
 	return func(c *Client) { c.noInstructions = true }
@@ -82,6 +88,7 @@ type Client struct {
 	filter         func(string) bool
 	timeout        time.Duration
 	noInstructions bool
+	deferLoading   bool
 	sdk            *sdk.Client
 
 	// session is the current connection, nil when disconnected. It is atomic so that tool calls never wait for mu,
@@ -242,7 +249,7 @@ func (c *Client) list(ctx context.Context, cs *sdk.ClientSession) error {
 		c.tools = append(c.tools, &Tool{
 			client:      c,
 			remoteName:  t.Name,
-			def:         chat.ToolDef{Name: name, Description: t.Description, InputSchema: schema},
+			def:         chat.ToolDef{Name: name, Description: t.Description, InputSchema: schema, Deferred: c.deferLoading},
 			annotations: annotationsOf(t.Annotations),
 		})
 	}

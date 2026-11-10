@@ -25,6 +25,9 @@ const (
 	ContentTypeMedia    ContentType = "media"
 	ContentTypeThinking ContentType = "thinking"
 	ContentTypeToolCall ContentType = "tool_call"
+	// ContentTypeServerTool is a record of a tool the provider ran on its side, such as a tool search call and its result.
+	// It is provider-private: Raw is sent back unchanged to the same API and dropped for any other, see ServerTool.
+	ContentTypeServerTool ContentType = "server_tool"
 )
 
 // ContentBlock is a message content block. The blocks of an assistant message keep the exact order returned by the model and are restored unchanged when sent back.
@@ -46,6 +49,8 @@ type ContentBlock struct {
 	Name     string   `json:"name,omitempty"`
 	// ToolCall is the content of a tool call block.
 	ToolCall *ToolCall `json:"tool_call,omitempty"`
+	// Raw is the provider's own JSON of a server tool block; Name then holds the server tool's name.
+	Raw json.RawMessage `json:"raw,omitempty"`
 }
 
 // Text creates a text content block.
@@ -66,6 +71,11 @@ type ToolDef struct {
 	Description   string           `json:"description,omitempty"`
 	InputSchema   json.RawMessage  `json:"input_schema,omitempty"`
 	InputExamples []map[string]any `json:"input_examples,omitempty"`
+	// Deferred keeps the tool out of the model's context until the model finds it through the provider's tool search.
+	// The full definition is still sent with every request, since the provider searches it there; once found it enters the
+	// context and stays callable for the rest of the conversation. Providers or models without tool search ignore it and
+	// show the tool from the start. Keep it stable within a session: changing it changes the cached prompt prefix.
+	Deferred bool `json:"deferred,omitempty"`
 }
 
 // StopReason is why the model stopped generating.
@@ -154,6 +164,7 @@ func CloneBlocks(in []ContentBlock) []ContentBlock {
 	for i, block := range in {
 		out[i] = block
 		out[i].Data = append([]byte(nil), block.Data...)
+		out[i].Raw = append(json.RawMessage(nil), block.Raw...)
 		if block.ToolCall != nil {
 			call := *block.ToolCall
 			call.Arguments = append(json.RawMessage(nil), block.ToolCall.Arguments...)

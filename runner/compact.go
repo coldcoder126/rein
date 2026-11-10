@@ -259,6 +259,8 @@ func estimateTokens(msg session.Message) int {
 			if block.ToolCall != nil {
 				total += (len(block.ToolCall.Name) + len(block.ToolCall.Arguments)) / 3
 			}
+		case chat.ContentTypeServerTool:
+			total += len(block.Raw) / 3
 		default:
 			total += len(block.Text) / 3
 		}

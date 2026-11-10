@@ -28,6 +28,7 @@ func WithToolCallIDNormalizer(fn func(id string) string) NormalizeOption {
 //
 //   - drops error / aborted assistant messages: they are incomplete turns and replaying them makes the API fail;
 //   - adds an error result for tool calls without one, and drops orphan tool results without a matching call;
+//   - keeps server tool records only for the API that produced them;
 //   - downgrades thinking blocks from other models to text and drops redacted ones; tool call IDs can be normalized,
 //     and provider-private signatures on text and tool call blocks, valid only for the original model, are cleared across models;
 //   - when the target endpoint does not support media input (see ModelInfo.SupportsMedia), replaces media in user messages and tool results with a note;
@@ -55,8 +56,9 @@ func NormalizeForModel(msgs []Message, target ModelInfo, opts ...NormalizeOption
 			if msg.StopReason == StopReasonError || msg.StopReason == StopReasonAborted {
 				continue
 			}
-			sameModel := msg.Provider == target.Provider && msg.API == target.API && msg.Model == target.Model
-			msg.Content = transformAssistantContent(msg.Content, sameModel, target.ImageOutput, cfg, idMap)
+			sameAPI := msg.Provider == target.Provider && msg.API == target.API
+			sameModel := sameAPI && msg.Model == target.Model
+			msg.Content = transformAssistantContent(msg.Content, sameAPI, sameModel, target.ImageOutput, cfg, idMap)
 			if len(msg.Content) == 0 {
 				continue
 			}
@@ -66,7 +68,7 @@ func NormalizeForModel(msgs []Message, target ModelInfo, opts ...NormalizeOption
 	return closeToolCalls(transformed)
 }
 
-func transformAssistantContent(blocks []ContentBlock, sameModel, keepImages bool, cfg normalizeConfig, idMap map[string]string) []ContentBlock {
+func transformAssistantContent(blocks []ContentBlock, sameAPI, sameModel, keepImages bool, cfg normalizeConfig, idMap map[string]string) []ContentBlock {
 	out := make([]ContentBlock, 0, len(blocks))
 	for _, block := range blocks {
 		switch block.Type {
@@ -89,6 +91,10 @@ func transformAssistantContent(blocks []ContentBlock, sameModel, keepImages bool
 				block.Signature = ""
 			}
 			out = append(out, block)
+		case ContentTypeServerTool:
+			if sameAPI {
+				out = append(out, block)
+			}
 		case ContentTypeToolCall:
 			if block.ToolCall == nil {
 				continue

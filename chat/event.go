@@ -17,8 +17,11 @@ const (
 	EventToolCallEnd   EventType = "tool_call_end"
 	// EventImage gives a complete model-generated image. Image blocks have no deltas; the event itself closes the block.
 	EventImage EventType = "image"
-	EventDone  EventType = "done"
-	EventError EventType = "error"
+	// EventServerTool gives a complete record of a tool the provider ran on its side, such as a tool search; like an image,
+	// the event itself closes the block. It is for progress display only: the record needs no handling.
+	EventServerTool EventType = "server_tool"
+	EventDone       EventType = "done"
+	EventError      EventType = "error"
 )
 
 // Event is a streaming model output event. It only describes model output, not tool execution.

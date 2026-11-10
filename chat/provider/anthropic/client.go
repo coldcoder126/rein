@@ -59,12 +59,27 @@ type Config struct {
 	// UnsignedThinking means the endpoint's thinking blocks carry no signature and are replayed as is;
 	// by default unsigned thinking blocks are downgraded to text, because Anthropic rejects them.
 	UnsignedThinking bool
+	// ToolSearch picks the server-side tool search used when a request has deferred tools (chat.ToolDef.Deferred):
+	// ToolSearchBM25 by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
+	ToolSearch ToolSearch
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
 	FileScope string
 	// HTTPHooks are debugging hooks at the raw HTTP layer.
 	HTTPHooks chat.HTTPHooks
 }
+
+// ToolSearch is the variant of Anthropic's server-side tool search.
+type ToolSearch string
+
+const (
+	// ToolSearchBM25 searches with natural language queries; it is the default.
+	ToolSearchBM25 ToolSearch = "bm25"
+	// ToolSearchRegex searches with regular expressions written by the model.
+	ToolSearchRegex ToolSearch = "regex"
+	// ToolSearchOff disables tool search: deferred tools are sent up front like any other.
+	ToolSearchOff ToolSearch = "off"
+)
 
 // Client wraps the Anthropic SDK.
 type Client struct {
@@ -106,6 +121,8 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		var blockType string
 		var toolArgs strings.Builder
 		var truncated bool
+		// serverRaw is the JSON of the open server tool block, completed with its streamed input at content_block_stop.
+		var serverRaw string
 
 		for stream.Next() {
 			event := stream.Current()
@@ -122,6 +139,10 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 				cb := event.AsContentBlockStart().ContentBlock
 				blockType = cb.Type
 				toolArgs.Reset()
+				serverRaw = ""
+				if isServerToolBlock(blockType) {
+					serverRaw = cb.RawJSON()
+				}
 				switch blockType {
 				case "tool_use":
 					tu := cb.AsToolUse()
@@ -151,7 +172,14 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 				}
 			case "content_block_stop":
 				var ok bool
-				if blockType == "tool_use" {
+				if serverRaw != "" {
+					raw, name, err := serverToolRecord(serverRaw, toolArgs.String())
+					if err != nil {
+						b.Fail(&chat.Error{Kind: chat.KindUnknown, Message: "anthropic: " + err.Error()})
+						return
+					}
+					ok = b.ServerTool(name, raw)
+				} else if blockType == "tool_use" {
 					args := json.RawMessage(toolArgs.String())
 					if len(args) > 0 && !json.Valid(args) {
 						// When the output is truncated the arguments stop halfway: keep the call with empty arguments and mark the finish
@@ -167,6 +195,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 					return
 				}
 				blockType = ""
+				serverRaw = ""
 			case "message_stop":
 				sawStop = true
 			case "message_delta":

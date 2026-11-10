@@ -156,6 +156,17 @@ func (b *Builder) ImageSigned(mimeType string, data []byte, signature string) bo
 	return b.emit(Event{Type: EventImage, Index: idx})
 }
 
+// ServerTool appends a complete record of a tool the provider ran on its side and emits a server_tool event;
+// raw is replayed unchanged to the same API.
+func (b *Builder) ServerTool(name string, raw json.RawMessage) bool {
+	if !b.Start() || !b.EndBlock() {
+		return false
+	}
+	idx := len(b.msg.Content)
+	b.msg.Content = append(b.msg.Content, ContentBlock{Type: ContentTypeServerTool, Name: name, Raw: raw})
+	return b.emit(Event{Type: EventServerTool, Index: idx})
+}
+
 // SignOpenBlock sets the signature of the open text or tool call block. It does nothing when no block is open.
 // A signature is a provider-private identifier that must be sent back unchanged on replay and is only valid for the original model.
 func (b *Builder) SignOpenBlock(signature string) {

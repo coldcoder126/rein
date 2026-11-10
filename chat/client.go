@@ -169,7 +169,7 @@ type Request struct {
 // The event sequence returned by Stream honors this contract:
 //   - it starts with EventStart and ends with exactly one EventDone or EventError;
 //   - text, thinking and tool call blocks come as paired Start/Delta/End events, and Index is the block's position in Message.Content;
-//     image blocks have no deltas: a single EventImage gives the complete image;
+//     image and server tool blocks have no deltas: a single EventImage or EventServerTool gives the complete block;
 //   - every failure (including cancellation) is reported through EventError, whose Message keeps the content generated so far;
 //     on failure a tool call block that is still open has incomplete arguments and is dropped (no end event);
 //   - Event.Message is a live object that advances with the events and is only valid during the callback; call Clone to keep it;

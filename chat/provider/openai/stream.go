@@ -16,6 +16,7 @@ type outputItem struct {
 	ID           string `json:"id"`
 	CallID       string `json:"call_id"`
 	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
 	Arguments    string `json:"arguments"`
 	Phase        string `json:"phase"`
 	Result       string `json:"result"`
@@ -251,8 +252,12 @@ func (s *streamState) itemDone(raw string) bool {
 		if !s.b.ToolCallStart(item.CallID, item.Name) {
 			return false
 		}
-		s.b.SignOpenBlock(item.ID)
+		s.b.SignOpenBlock(encodeCallSignature(item.ID, item.Namespace))
 		return s.b.ToolCallEnd(json.RawMessage(args))
+
+	case "tool_search_call", "tool_search_output":
+		// Hosted tool search runs on the server; the items are kept whole and replayed so the tools they loaded stay loaded.
+		return s.b.ServerTool(item.Type, json.RawMessage(raw))
 
 	case "image_generation_call":
 		if item.Result == "" {

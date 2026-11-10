@@ -12,7 +12,7 @@ import (
 )
 
 func convertMessagesT(messages []chat.Message) ([]goanthropic.MessageParam, error) {
-	return convertMessages(messages, false)
+	return convertMessages(messages, false, false)
 }
 
 func toolCallBlock(id, name, args string) chat.ContentBlock {
@@ -71,7 +71,7 @@ func TestConvertToolsKeepsFullSchema(t *testing.T) {
 			"additionalProperties":false,
 			"$defs":{"step":{"type":"string","enum":["a","b"]}}
 		}`),
-	}})
+	}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestConvertUnsignedThinking(t *testing.T) {
 		{Type: chat.ContentTypeThinking},
 		chat.Text("回答"),
 	}}}
-	out, err := convertMessages(msgs, false)
+	out, err := convertMessages(msgs, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestConvertUnsignedThinking(t *testing.T) {
 	if strings.Contains(string(raw), `"type":"thinking"`) || !strings.Contains(string(raw), `"text":"没签名的思考"`) {
 		t.Fatalf("unsigned thinking should become text and empty blocks be dropped: %s", raw)
 	}
-	out, _ = convertMessages(msgs[:1], true)
+	out, _ = convertMessages(msgs[:1], true, false)
 	raw, _ = json.Marshal(out)
 	if !strings.Contains(string(raw), `"thinking":"没签名的思考"`) {
 		t.Fatalf("UnsignedThinking should replay as is: %s", raw)

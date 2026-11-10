@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/openai/openai-go/v3/packages/param"
@@ -23,7 +24,8 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 	if c.cfg.NoStructuredOutput {
 		req = chat.WithOutputInstructions(req)
 	}
-	input, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)))
+	search := !c.cfg.DisableToolSearch && slices.ContainsFunc(req.Tools, func(def chat.ToolDef) bool { return def.Deferred })
+	input, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)), search)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -92,7 +94,7 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 		params.SetExtraFields(extra)
 	}
 
-	tools, err := convertTools(req.Tools, c.cfg.ImageGeneration)
+	tools, err := convertTools(req.Tools, c.cfg.ImageGeneration, search)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -104,7 +106,9 @@ func rawItem(v map[string]any) responses.ResponseInputItemUnionParam {
 	return param.Override[responses.ResponseInputItemUnionParam](v)
 }
 
-func convertMessages(messages []chat.Message) (responses.ResponseInputParam, error) {
+// convertMessages converts the history. Server tool records are replayed only when the request has tool search on:
+// without it the API has nothing to resolve them against, and every tool is sent up front anyway.
+func convertMessages(messages []chat.Message, serverTools bool) (responses.ResponseInputParam, error) {
 	var items responses.ResponseInputParam
 	var generated []map[string]any
 	// Generated images in assistant messages cannot be replayed as assistant content (statelessly, image_generation_call refers to a
@@ -130,7 +134,7 @@ func convertMessages(messages []chat.Message) (responses.ResponseInputParam, err
 			}
 		case chat.RoleAssistant:
 			flush()
-			assistant, images := assistantItems(i, m)
+			assistant, images := assistantItems(i, m, serverTools)
 			items = append(items, assistant...)
 			generated = images
 		case chat.RoleTool:
@@ -226,7 +230,7 @@ func toolOutput(blocks []chat.ContentBlock) (any, error) {
 // assistantItems rebuilds Responses input items from an assistant message in block order, and returns generated images that must be replayed separately.
 // Stateless replay relies on block signatures: thinking blocks keep the full reasoning item, text blocks keep the message id and phase,
 // and tool call blocks keep the item id of the function_call.
-func assistantItems(msgIndex int, m chat.Message) ([]responses.ResponseInputItemUnionParam, []map[string]any) {
+func assistantItems(msgIndex int, m chat.Message, serverTools bool) ([]responses.ResponseInputItemUnionParam, []map[string]any) {
 	var items []responses.ResponseInputItemUnionParam
 	var images []map[string]any
 	for blockIndex, block := range m.Content {
@@ -263,18 +267,28 @@ func assistantItems(msgIndex int, m chat.Message) ([]responses.ResponseInputItem
 			item := map[string]any{
 				"type": "function_call", "call_id": block.ToolCall.ID, "name": block.ToolCall.Name, "arguments": args,
 			}
-			if block.Signature != "" {
-				item["id"] = block.Signature
+			sig := decodeCallSignature(block.Signature)
+			if sig.ID != "" {
+				item["id"] = sig.ID
+			}
+			if sig.Namespace != "" {
+				item["namespace"] = sig.Namespace
 			}
 			items = append(items, rawItem(item))
 		case chat.ContentTypeMedia:
 			images = append(images, mediaPart(block))
+		case chat.ContentTypeServerTool:
+			if serverTools && len(block.Raw) > 0 {
+				items = append(items, param.Override[responses.ResponseInputItemUnionParam](block.Raw))
+			}
 		}
 	}
 	return items, images
 }
 
-func convertTools(defs []chat.ToolDef, imageGeneration bool) ([]responses.ToolUnionParam, error) {
+// convertTools converts the tools. With tool search on, deferred functions are marked defer_loading and the hosted
+// tool_search is appended after them, so turning it on leaves the order of the other tools unchanged.
+func convertTools(defs []chat.ToolDef, imageGeneration, search bool) ([]responses.ToolUnionParam, error) {
 	var out []responses.ToolUnionParam
 	for _, def := range defs {
 		var schema map[string]any
@@ -290,12 +304,45 @@ func convertTools(defs []chat.ToolDef, imageGeneration bool) ([]responses.ToolUn
 		if def.Description != "" {
 			tool["description"] = def.Description
 		}
+		if search && def.Deferred {
+			tool["defer_loading"] = true
+		}
 		out = append(out, param.Override[responses.ToolUnionParam](tool))
+	}
+	if search {
+		out = append(out, param.Override[responses.ToolUnionParam](map[string]any{"type": "tool_search"}))
 	}
 	if imageGeneration {
 		out = append(out, param.Override[responses.ToolUnionParam](map[string]any{"type": "image_generation"}))
 	}
 	return out, nil
+}
+
+// callSignature is the content of a function call block signature: the item id, plus the namespace of a function the
+// model loaded through tool search, which the API requires back. Without a namespace the signature is the bare item id.
+type callSignature struct {
+	V         int    `json:"v"`
+	ID        string `json:"id"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+func encodeCallSignature(id, namespace string) string {
+	if namespace == "" {
+		return id
+	}
+	raw, _ := json.Marshal(callSignature{V: 1, ID: id, Namespace: namespace})
+	return string(raw)
+}
+
+func decodeCallSignature(sig string) callSignature {
+	if !strings.HasPrefix(sig, "{") {
+		return callSignature{ID: sig}
+	}
+	var out callSignature
+	if json.Unmarshal([]byte(sig), &out) != nil || out.V != 1 {
+		return callSignature{}
+	}
+	return out
 }
 
 // textSignature is the content of a text block signature: the Responses message id and phase.

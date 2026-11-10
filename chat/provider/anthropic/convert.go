@@ -28,8 +28,9 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 		systemBlocks = append(systemBlocks, block)
 	}
 
+	search := c.toolSearchVariant(spec, req.Tools)
 	messages := chat.NormalizeForModel(req.Messages, target, chat.WithToolCallIDNormalizer(normalizeToolCallID))
-	msgs, err := convertMessages(messages, c.cfg.UnsignedThinking)
+	msgs, err := convertMessages(messages, c.cfg.UnsignedThinking, search != "")
 	if err != nil {
 		return goanthropic.MessageNewParams{}, err
 	}
@@ -73,7 +74,7 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 		params.Temperature = goanthropic.Float(*req.Temperature)
 	}
 	if len(req.Tools) > 0 {
-		tools, err := convertTools(req.Tools)
+		tools, err := convertTools(req.Tools, search)
 		if err != nil {
 			return goanthropic.MessageNewParams{}, err
 		}
@@ -110,7 +111,9 @@ func markLastBlock(msgs []goanthropic.MessageParam, cc *goanthropic.CacheControl
 	}
 }
 
-func convertMessages(messages []chat.Message, unsignedThinking bool) ([]goanthropic.MessageParam, error) {
+// convertMessages converts the history. Server tool records are replayed only when the request has tool search on:
+// without it the API cannot resolve the tools they reference, and every tool is sent up front anyway.
+func convertMessages(messages []chat.Message, unsignedThinking, serverTools bool) ([]goanthropic.MessageParam, error) {
 	var msgs []goanthropic.MessageParam
 	for i := 0; i < len(messages); {
 		m := messages[i]
@@ -127,7 +130,7 @@ func convertMessages(messages []chat.Message, unsignedThinking bool) ([]goanthro
 			msgs = append(msgs, goanthropic.NewUserMessage(blocks...))
 			continue
 		}
-		param, ok, err := convertMessage(m, unsignedThinking)
+		param, ok, err := convertMessage(m, unsignedThinking, serverTools)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +142,7 @@ func convertMessages(messages []chat.Message, unsignedThinking bool) ([]goanthro
 	return msgs, nil
 }
 
-func convertMessage(m chat.Message, unsignedThinking bool) (goanthropic.MessageParam, bool, error) {
+func convertMessage(m chat.Message, unsignedThinking, serverTools bool) (goanthropic.MessageParam, bool, error) {
 	switch m.Role {
 	case chat.RoleUser:
 		var blocks []goanthropic.ContentBlockParamUnion
@@ -190,6 +193,10 @@ func convertMessage(m chat.Message, unsignedThinking bool) (goanthropic.MessageP
 					input = map[string]any{}
 				}
 				blocks = append(blocks, goanthropic.NewToolUseBlock(block.ToolCall.ID, input, block.ToolCall.Name))
+			case chat.ContentTypeServerTool:
+				if serverTools && len(block.Raw) > 0 {
+					blocks = append(blocks, serverToolParam(block.Raw))
+				}
 			default:
 				return goanthropic.MessageParam{}, false, fmt.Errorf("anthropic: assistant messages do not support content block type %q", block.Type)
 			}
@@ -294,8 +301,10 @@ func mediaBlock(block chat.ContentBlock) (*goanthropic.ImageBlockParam, *goanthr
 
 // convertTools passes the JSON Schema through in full: fields other than properties/required ($defs, additionalProperties and so on)
 // are kept via ExtraFields.
-func convertTools(defs []chat.ToolDef) ([]goanthropic.ToolUnionParam, error) {
-	out := make([]goanthropic.ToolUnionParam, len(defs))
+//
+// With a tool search variant, deferred tools are marked defer_loading and the search tool is appended; otherwise every tool loads up front.
+func convertTools(defs []chat.ToolDef, search ToolSearch) ([]goanthropic.ToolUnionParam, error) {
+	out := make([]goanthropic.ToolUnionParam, len(defs), len(defs)+1)
 	for i, def := range defs {
 		var schema map[string]any
 		if len(def.InputSchema) > 0 {
@@ -330,7 +339,13 @@ func convertTools(defs []chat.ToolDef) ([]goanthropic.ToolUnionParam, error) {
 		if len(def.InputExamples) > 0 {
 			tp.InputExamples = def.InputExamples
 		}
+		if search != "" && def.Deferred {
+			tp.DeferLoading = goanthropic.Bool(true)
+		}
 		out[i] = goanthropic.ToolUnionParam{OfTool: &tp}
+	}
+	if search != "" {
+		out = append(out, searchTool(search))
 	}
 	return out, nil
 }

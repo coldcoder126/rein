@@ -14,7 +14,7 @@ rein is a Go framework for building LLM agents: the agent loop, tools, sessions 
 
 - **Model providers**: Anthropic first, plus OpenAI, Gemini and DeepSeek behind one interface: messages, streaming events, classified errors, structured output, and media input inline, by URL or as uploaded files.
 - **Agent loop**: parallel tool execution with timeouts and result truncation, steering and follow-up messages during a run, and a middleware chain wrapping runs, turns, model calls and tool calls.
-- **Tools**: typed tools from a parameter struct, with the schema generated for you; toolsets that provide tools per session.
+- **Tools**: typed tools from a parameter struct, with the schema generated for you; toolsets that provide tools per session; deferred tools found through the provider's tool search (Anthropic, OpenAI) without breaking the prompt cache.
 - **Sub-agents and background tasks**: delegate work to sub-agents running in the background; run shell commands in the background too.
 - **Runner**: sessions persisted through a store interface, background runs that any number of views can follow and rejoin, message queues, automatic context compaction, and the model chosen per run.
 - **Built-in tools**: skills, a checklist, shell, background task management, and MCP servers.

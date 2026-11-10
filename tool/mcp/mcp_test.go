@@ -245,3 +245,23 @@ func TestUnavailableAndReconnect(t *testing.T) {
 		t.Fatal("a closed client should fail")
 	}
 }
+
+func TestWithDeferLoading(t *testing.T) {
+	ts := newTestServer(t, nil)
+	addTool(ts.server, "a", nil)
+	for _, deferred := range []bool{false, true} {
+		var opts []Option
+		if deferred {
+			opts = append(opts, WithDeferLoading())
+		}
+		client := New("srv", ts.transport(), opts...)
+		tools, err := client.Tools(context.Background(), tool.RunInfo{})
+		client.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tools) != 1 || tools[0].Def().Deferred != deferred {
+			t.Fatalf("deferred=%v: wrong tools %+v", deferred, tools)
+		}
+	}
+}

@@ -56,5 +56,6 @@ func NewResponses(cfg openaiprovider.Config) *openaiprovider.Client {
 	}
 	cfg.DisableStoreParams = true
 	cfg.NoStructuredOutput = true
+	cfg.DisableToolSearch = true
 	return openaiprovider.New(cfg)
 }

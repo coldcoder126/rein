@@ -21,16 +21,20 @@ type modelSpec struct {
 	alwaysThinks bool
 	// structuredOutput means the model supports JSON Schema constraints via output_config.format.
 	structuredOutput bool
+	// toolSearch means the model supports the server-side tool search, which deferred tools need.
+	toolSearch bool
 }
 
 // specFor returns the spec for a model name. Unknown Claude models are treated as the latest generation; non-Claude models (compatible endpoints) get conservative values.
 func specFor(model string) modelSpec {
-	current := modelSpec{maxInput: 1_000_000, maxOutput: 128_000, structuredOutput: true}
+	current := modelSpec{maxInput: 1_000_000, maxOutput: 128_000, structuredOutput: true, toolSearch: true}
 	switch {
 	case !strings.HasPrefix(model, "claude-"):
 		return modelSpec{maxInput: 200_000, maxOutput: 8_192, budgetThinking: true}
-	case strings.Contains(model, "-4-5"), strings.HasPrefix(model, "claude-3"):
+	case strings.HasPrefix(model, "claude-3"):
 		return modelSpec{maxInput: 200_000, maxOutput: 64_000, budgetThinking: true, structuredOutput: true}
+	case strings.Contains(model, "-4-5"):
+		return modelSpec{maxInput: 200_000, maxOutput: 64_000, budgetThinking: true, structuredOutput: true, toolSearch: true}
 	case strings.Contains(model, "-4-6"):
 		current.noXHigh = true
 	case strings.Contains(model, "sonnet-5-5"), strings.Contains(model, "opus-5-5"), strings.Contains(model, "fable"):

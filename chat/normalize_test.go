@@ -217,3 +217,24 @@ func TestImageLimitsWithDefaults(t *testing.T) {
 		t.Fatalf("zero fields should use the defaults: %+v", got)
 	}
 }
+
+func TestNormalizeKeepsServerToolRecordsForTheSameAPI(t *testing.T) {
+	record := chat.ContentBlock{Type: chat.ContentTypeServerTool, Name: "tool_search", Raw: []byte(`{"type":"x"}`)}
+	msg := assistant("p", "m1", chat.Text("hi"), record)
+	msg.API = "api"
+
+	same := chat.NormalizeForModel([]chat.Message{msg}, chat.ModelInfo{Provider: "p", API: "api", Model: "m2"})
+	if len(same[0].Content) != 2 || string(same[0].Content[1].Raw) != `{"type":"x"}` {
+		t.Fatalf("another model on the same API should get the record: %+v", same[0].Content)
+	}
+	other := chat.NormalizeForModel([]chat.Message{msg}, chat.ModelInfo{Provider: "q", API: "other", Model: "m1"})
+	if len(other[0].Content) != 1 || other[0].Content[0].Type != chat.ContentTypeText {
+		t.Fatalf("another API should not get the record: %+v", other[0].Content)
+	}
+
+	cloned := chat.CloneBlocks([]chat.ContentBlock{record})
+	cloned[0].Raw[2] = 'X'
+	if string(record.Raw) != `{"type":"x"}` {
+		t.Fatal("CloneBlocks should copy Raw")
+	}
+}

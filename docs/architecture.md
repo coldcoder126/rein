@@ -29,7 +29,7 @@ Core boundaries:
 
 ### Stream event protocol
 
-Events start with `start` and end with exactly one `done` or `error`; text, thinking and tool call blocks come as paired start/delta/end events, and `Index` points to the block's position in the message; every event carries the message accumulated so far (a live object, only valid during the callback). Tool arguments are not streamed yet; `tool_call_end` gives the complete call.
+Events start with `start` and end with exactly one `done` or `error`; text, thinking and tool call blocks come as paired start/delta/end events, while images and server tool records come whole in a single `image` / `server_tool` event; `Index` points to the block's position in the message; every event carries the message accumulated so far (a live object, only valid during the callback). Tool arguments are not streamed yet; `tool_call_end` gives the complete call.
 
 Every provider produces events through `Builder`, which maintains the protocol invariants; `chattest.CheckStream` is the matching contract check, and provider tests run it against an httptest fake server.
 
@@ -67,7 +67,16 @@ Once the stream is established nothing is thrown: every failure (including cance
 
 ### Replay normalization
 
-`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, downgrades thinking blocks to text and normalizes tool call IDs across models (a message counts as the same model only when provider, API and model all match), and replaces media the model does not accept with a note.
+`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, downgrades thinking blocks to text and normalizes tool call IDs across models (a message counts as the same model only when provider, API and model all match), keeps server tool records only for the API that produced them, and replaces media the model does not accept with a note.
+
+### Deferred tools
+
+A tool marked `ToolDef.Deferred` is still sent in full with every request, but the model does not see it until it finds it through the provider's server-side tool search; the search and the loading of what it finds both happen inside the provider's response. The tool list stays fixed and loaded definitions are appended where the search result sits, so the prompt cache is kept. The search call and its result come back as `server_tool` blocks, which are stored and replayed verbatim.
+
+- Anthropic: `defer_loading` plus `tool_search_tool_bm25` (default) or `_regex` (`Config.ToolSearch`), on Claude 4.5 and later. In testing BM25 did not match tools described in Chinese, while regex did.
+- OpenAI: `defer_loading` plus the hosted `tool_search` (gpt-5.4 and later); a function loaded this way keeps its `namespace` in the tool call signature, as the API requires it back. `DisableToolSearch` turns it off.
+- Without tool search (other providers and models, DeepSeek, or turned off) every tool is sent up front; the records are not replayed.
+- Keep `Deferred` stable within a session, and do not remove a deferred tool the conversation has already loaded.
 
 Real providers live in `chat/provider/*`. Each requires `Config.Model` and has no built-in default, so upgrading rein never changes the model you run; the model constants are only shorthands.
 
@@ -106,6 +115,7 @@ Writing a tool only needs the `tool` package.
 - `Result`: `Content` enters the model context of the next turn; `Details` are for the UI, logs and business; `IsError` marks an error; `Terminate` ends the run when every result of the batch asks for it; `Usage` is the tokens consumed inside the tool, counted in the run total.
 - Optional interfaces: `Sequential` requires the whole batch containing the tool to run sequentially, and `Timeouter` declares the tool's own timeout. With `tool.New` they are set through options.
 - Background tasks: `TaskManager` is the background task manager the runtime (the runner) provides to a session; tools get it with `tool.TaskManagerFrom(ctx)`, and nil means background tasks are not supported. A tool hands it a `TaskSpec` (type, description, run function) to run in the background, and the runtime sends the result back to the session as a notice when it ends; snapshots are a common `Task`, with `Type` telling sub-agents, background commands and so on apart. Tools that depend on background tasks implement `NeedsTaskManager`, and the Agent hides them without a `TaskManager`.
+- `Defer` / `DeferAll`: mark a tool or a whole toolset as deferred, see "Deferred tools" above. Keep the few tools used in most turns loaded.
 - `Toolset`: a source of tools in bulk (skills, MCP servers). It is resolved once at the start of each run and can return different tools per session; the tool list stays fixed within a run so the prompt cache is not broken. A toolset can also implement `Instructor` to append instructions to the system prompt.
 
 ## agent
@@ -226,6 +236,7 @@ Skills are focused instructions for the model, optionally with resource files. T
 
 - Transports: `mcp.Stdio` (a local subprocess, started anew on every connection) and `mcp.HTTP` (Streamable HTTP; credentials go through the caller's `http.Client`). The OAuth flow is not implemented.
 - Connection: made on the first run and checked at the start of every run, reconnecting when it has dropped; there is no reconnection in the middle of a run. One client is shared by all sessions and runs, and the business closes it. A server that cannot be reached does not fail the run: it contributes no tools and the system prompt says it is unavailable.
+- Deferred loading: `WithDeferLoading` marks every tool of the server as deferred, for servers with many tools.
 - Naming: `mcp__{server}__{tool}`, as in Claude Code, so middlewares can match a whole server by prefix. Characters model providers reject become `_`; a tool whose name is still too long or collides is skipped and reported in the system prompt. `WithFilter` narrows the tools.
 - Tool list: cached until the server sends a list-changed notification or, on 2026-07-28 servers, its `ttlMs` expires; a failed refresh keeps the previous list. The server's instructions are appended to the system prompt unless `WithoutInstructions` is given.
 - Calls: text becomes text blocks; images, audio and binary embedded resources become media blocks; resource links become a line of text; `structuredContent` goes to `Details` (and to text when there is no other content); `isError` carries over. Protocol errors, timeouts (`WithTimeout`, otherwise `Agent.ToolTimeout`) and requests for user input become error results for the model. Output size is capped by `Agent.MaxToolResultBytes` like any tool.
