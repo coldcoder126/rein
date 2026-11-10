@@ -21,22 +21,22 @@ func (c *Client) toolSearchVariant(spec modelSpec, tools []chat.ToolDef) ToolSea
 	if !slices.ContainsFunc(tools, func(def chat.ToolDef) bool { return def.Deferred }) {
 		return ""
 	}
-	if c.cfg.ToolSearch == ToolSearchRegex {
-		return ToolSearchRegex
+	if c.cfg.ToolSearch == ToolSearchBM25 {
+		return ToolSearchBM25
 	}
-	return ToolSearchBM25
+	return ToolSearchRegex
 }
 
 // searchTool is the definition of the server-side tool search. It goes after the request's own tools, so turning it on
 // leaves their order unchanged; it is never deferred, which also satisfies the API's rule that some tool must load up front.
 func searchTool(variant ToolSearch) goanthropic.ToolUnionParam {
-	if variant == ToolSearchRegex {
-		return goanthropic.ToolUnionParam{OfToolSearchToolRegex20251119: &goanthropic.ToolSearchToolRegex20251119Param{
-			Type: goanthropic.ToolSearchToolRegex20251119TypeToolSearchToolRegex20251119,
+	if variant == ToolSearchBM25 {
+		return goanthropic.ToolUnionParam{OfToolSearchToolBm25_20251119: &goanthropic.ToolSearchToolBm25_20251119Param{
+			Type: goanthropic.ToolSearchToolBm25_20251119TypeToolSearchToolBm25_20251119,
 		}}
 	}
-	return goanthropic.ToolUnionParam{OfToolSearchToolBm25_20251119: &goanthropic.ToolSearchToolBm25_20251119Param{
-		Type: goanthropic.ToolSearchToolBm25_20251119TypeToolSearchToolBm25_20251119,
+	return goanthropic.ToolUnionParam{OfToolSearchToolRegex20251119: &goanthropic.ToolSearchToolRegex20251119Param{
+		Type: goanthropic.ToolSearchToolRegex20251119TypeToolSearchToolRegex20251119,
 	}}
 }
 

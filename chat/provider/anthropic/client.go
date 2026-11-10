@@ -60,7 +60,7 @@ type Config struct {
 	// by default unsigned thinking blocks are downgraded to text, because Anthropic rejects them.
 	UnsignedThinking bool
 	// ToolSearch picks the server-side tool search used when a request has deferred tools (chat.ToolDef.Deferred):
-	// ToolSearchBM25 by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
+	// ToolSearchRegex by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
 	ToolSearch ToolSearch
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
@@ -73,10 +73,12 @@ type Config struct {
 type ToolSearch string
 
 const (
-	// ToolSearchBM25 searches with natural language queries; it is the default.
-	ToolSearchBM25 ToolSearch = "bm25"
-	// ToolSearchRegex searches with regular expressions written by the model.
+	// ToolSearchRegex searches with regular expressions written by the model; it is the default. It matches substrings,
+	// so it finds tools described in Chinese and tools sharing a name prefix such as mcp__{server}__.
 	ToolSearchRegex ToolSearch = "regex"
+	// ToolSearchBM25 searches with natural language queries. It splits words on spaces, so in testing it did not find
+	// tools described in Chinese.
+	ToolSearchBM25 ToolSearch = "bm25"
 	// ToolSearchOff disables tool search: deferred tools are sent up front like any other.
 	ToolSearchOff ToolSearch = "off"
 )

@@ -44,13 +44,13 @@ func TestDeferredToolsUseToolSearch(t *testing.T) {
 	if _, ok := tools[0]["defer_loading"]; ok || tools[1]["defer_loading"] != true {
 		t.Fatalf("only the deferred tool should be marked: %v", tools)
 	}
-	if tools[2]["type"] != "tool_search_tool_bm25_20251119" {
-		t.Fatalf("BM25 search should be the default: %v", tools[2])
+	if tools[2]["type"] != "tool_search_tool_regex_20251119" {
+		t.Fatalf("regex search should be the default: %v", tools[2])
 	}
 
-	tools = toolsJSON(t, New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchRegex}), req)
-	if tools[2]["type"] != "tool_search_tool_regex_20251119" {
-		t.Fatalf("regex search was asked for: %v", tools[2])
+	tools = toolsJSON(t, New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchBM25}), req)
+	if tools[2]["type"] != "tool_search_tool_bm25_20251119" {
+		t.Fatalf("BM25 search was asked for: %v", tools[2])
 	}
 }
 

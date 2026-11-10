@@ -73,7 +73,7 @@ Once the stream is established nothing is thrown: every failure (including cance
 
 A tool marked `ToolDef.Deferred` is still sent in full with every request, but the model does not see it until it finds it through the provider's server-side tool search; the search and the loading of what it finds both happen inside the provider's response. The tool list stays fixed and loaded definitions are appended where the search result sits, so the prompt cache is kept. The search call and its result come back as `server_tool` blocks, which are stored and replayed verbatim.
 
-- Anthropic: `defer_loading` plus `tool_search_tool_bm25` (default) or `_regex` (`Config.ToolSearch`), on Claude 4.5 and later. In testing BM25 did not match tools described in Chinese, while regex did.
+- Anthropic: `defer_loading` plus `tool_search_tool_regex` (default) or `_bm25` (`Config.ToolSearch`), on Claude 4.5 and later. Regex matches substrings, so it finds tools described in Chinese (BM25 did not in testing) and whole MCP servers by their `mcp__{server}__` prefix. Anthropic has no namespaces: tools load one by one.
 - OpenAI: `defer_loading` plus the hosted `tool_search` (gpt-5.4 and later); a function loaded this way keeps its `namespace` in the tool call signature, as the API requires it back. `DisableToolSearch` turns it off.
 - Without tool search (other providers and models, DeepSeek, or turned off) every tool is sent up front; the records are not replayed.
 - Keep `Deferred` stable within a session, and do not remove a deferred tool the conversation has already loaded.
