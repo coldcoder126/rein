@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.78.0
-	github.com/coldcoder126/rein v0.0.0
+	github.com/coldcoder126/rein v0.2.3
 )
 
 require (

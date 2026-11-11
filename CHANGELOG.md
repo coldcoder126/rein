@@ -2,7 +2,7 @@
 
 Breaking changes and notable additions per release. Before v1 any release may break the API.
 
-## Unreleased
+## v0.2.3 (2026-11-11)
 
 ### Breaking
 

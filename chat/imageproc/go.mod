@@ -3,7 +3,7 @@ module github.com/coldcoder126/rein/chat/imageproc
 go 1.26.0
 
 require (
-	github.com/coldcoder126/rein v0.0.0
+	github.com/coldcoder126/rein v0.2.3
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	golang.org/x/image v0.47.0
 )

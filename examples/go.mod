@@ -3,9 +3,9 @@ module github.com/coldcoder126/rein/examples
 go 1.26.0
 
 require (
-	github.com/coldcoder126/rein v0.0.0
-	github.com/coldcoder126/rein/chat/api/anthropic v0.0.0
-	github.com/coldcoder126/rein/tool/mcp v0.0.0
+	github.com/coldcoder126/rein v0.2.3
+	github.com/coldcoder126/rein/chat/api/anthropic v0.2.3
+	github.com/coldcoder126/rein/tool/mcp v0.2.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
 
