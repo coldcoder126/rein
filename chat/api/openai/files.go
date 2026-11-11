@@ -55,7 +55,7 @@ func (c *Client) fileScope() string {
 	switch {
 	case c.cfg.FileScope != "":
 		return c.cfg.FileScope
-	case c.cfg.BaseURL == "":
+	case c.cfg.Endpoint.BaseURL == "":
 		return providerName
 	}
 	return ""

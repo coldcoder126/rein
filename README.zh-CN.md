@@ -55,7 +55,7 @@ fmt.Println(result.Final.TextContent())
 
 | 包 | 职责 |
 |---|---|
-| `chat` | 模型协议：消息、流式事件、错误、结构化输出、模型中间件；各家模型的实现在 `chat/provider/*` |
+| `chat` | 模型协议：消息、流式事件、错误、结构化输出、模型中间件；每种协议一个包，在 `chat/api/*` |
 | `tool` | 工具接口、执行上下文、结果、带类型的工具、工具集 |
 | `agent` | Agent 定义及其循环；子 Agent 作为工具 |
 | `session` | 会话和消息、存储接口、内存存储 |
@@ -67,10 +67,9 @@ fmt.Println(result.Final.TextContent())
 
 | 包 | 说明 |
 |---|---|
-| [`chat/provider/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/anthropic) | Anthropic Messages API 及兼容的接口 |
-| [`chat/provider/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/openai) | OpenAI Responses API 及兼容的接口 |
-| [`chat/provider/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/gemini) | Google Gemini |
-| [`chat/provider/deepseek`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/deepseek) | DeepSeek |
+| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API 及兼容的接口（内置 DeepSeek 预设） |
+| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API 及兼容的接口（内置 DeepSeek 预设） |
+| [`chat/api/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/gemini) | Google Gemini |
 | [`chat/imageproc`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/imageproc) | 图片进入历史前的规整（格式、尺寸） |
 | [`tool/skill`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/skill) | 技能：按需加载的说明和资源文件 |
 | [`tool/todo`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/todo) | 模型处理多步任务时维护的待办清单 |

@@ -37,13 +37,13 @@ type APIKeyProvider func(ctx context.Context) (string, error)
 
 // Config configures the Anthropic Client.
 type Config struct {
-	// Provider names the vendor in messages, usage and errors; "anthropic" by default. Set it for compatible endpoints.
-	Provider       string
+	// Endpoint is the service the client talks to: the zero value is Anthropic's own, DeepSeek is a preset,
+	// and any other compatible endpoint is described by filling one in.
+	Endpoint       Endpoint
 	APIKey         string
 	APIKeyProvider APIKeyProvider
-	BaseURL        string
 	Model          string
-	// MaxInputTokens / MaxOutputTokens of 0 use the model's built-in specs;
+	// MaxInputTokens / MaxOutputTokens of 0 use the endpoint's limits, or the model's built-in specs when it has none;
 	// when a request sets no MaxTokens, MaxOutputTokens is used as max_tokens.
 	MaxInputTokens  int
 	MaxOutputTokens int
@@ -51,19 +51,12 @@ type Config struct {
 	MaxRetries      int
 	Headers         map[string]string
 	HTTPClient      *http.Client
-	// TextOnly means the endpoint accepts no media input (as with some Anthropic-compatible endpoints).
-	TextOnly bool
-	// BudgetThinking forces budget thinking (thinking.type=enabled), for compatible endpoints without adaptive thinking;
-	// Claude models are configured from built-in specs and need no setting.
-	BudgetThinking bool
-	// UnsignedThinking means the endpoint's thinking blocks carry no signature and are replayed as is;
-	// by default unsigned thinking blocks are downgraded to text, because Anthropic rejects them.
-	UnsignedThinking bool
 	// ToolSearch picks the server-side tool search used when a request has deferred tools (chat.ToolDef.Deferred):
 	// ToolSearchRegex by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
 	ToolSearch ToolSearch
 	// PrefixMismatch says what the API does with a replayed thinking block whose conversation changed since it was produced,
-	// on models that bind thinking to the conversation: PrefixMismatchDrop by default.
+	// on models that bind thinking to the conversation: PrefixMismatchDrop by default. Endpoints that do not accept the
+	// setting say so with Compat.NoThinkingBinding.
 	PrefixMismatch PrefixMismatch
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
@@ -97,8 +90,6 @@ const (
 	PrefixMismatchDrop PrefixMismatch = "drop_block"
 	// PrefixMismatchError rejects the request, for finding where history is edited.
 	PrefixMismatchError PrefixMismatch = "error"
-	// PrefixMismatchOff sends no setting and no beta header, for endpoints that do not accept them; the account's default applies.
-	PrefixMismatchOff PrefixMismatch = "off"
 )
 
 // prefixMismatchBeta is the beta that allows setting thinking.block_binding.
@@ -114,8 +105,8 @@ func New(cfg Config) *Client {
 	if cfg.Model == "" {
 		panic("anthropic: Config.Model must not be empty")
 	}
-	if cfg.Provider == "" {
-		cfg.Provider = providerName
+	if cfg.Endpoint.Provider == "" {
+		cfg.Endpoint.Provider = providerName
 	}
 	return &Client{cfg: cfg}
 }
@@ -256,12 +247,12 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 func (c *Client) Info() chat.ModelInfo {
 	spec := c.spec(c.cfg.Model)
 	return chat.ModelInfo{
-		Provider:         c.cfg.Provider,
+		Provider:         c.cfg.Endpoint.Provider,
 		API:              API,
 		Model:            c.cfg.Model,
 		MaxInputTokens:   spec.maxInput,
 		MaxOutputTokens:  spec.maxOutput,
-		SupportsMedia:    !c.cfg.TextOnly,
+		SupportsMedia:    !c.cfg.Endpoint.Compat.NoMedia,
 		StructuredOutput: spec.structuredOutput,
 		FileScope:        c.fileScope(),
 		ImageLimits:      chat.DefaultImageLimits,
@@ -286,8 +277,8 @@ func (c *Client) newSDKClient(ctx context.Context) (goanthropic.Client, error) {
 		apiKey = key
 	}
 	opts = append(opts, option.WithAPIKey(apiKey))
-	if c.cfg.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(c.cfg.BaseURL))
+	if c.cfg.Endpoint.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(c.cfg.Endpoint.BaseURL))
 	}
 	if hc := c.cfg.HTTPHooks.HTTPClient(c.cfg.HTTPClient); hc != nil {
 		opts = append(opts, option.WithHTTPClient(hc))
@@ -323,7 +314,7 @@ func (c *Client) wrapError(ctx context.Context, err error) *chat.Error {
 	}
 	ce := chat.WrapError(ctx, err, status, retryAfter)
 	if ce.Message == "" {
-		ce.Message = c.cfg.Provider
+		ce.Message = c.cfg.Endpoint.Provider
 	}
 	return ce
 }

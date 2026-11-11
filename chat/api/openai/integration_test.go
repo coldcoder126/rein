@@ -237,7 +237,7 @@ var cityRequest = chat.Request{Messages: []chat.Message{chat.NewUserTextMessage(
 
 // Structured output: native constraints, and prompt injection plus local validation for endpoints without native constraints.
 func TestIntegrationStructuredOutput(t *testing.T) {
-	for name, cfg := range map[string]Config{"native": {}, "fallback": {NoStructuredOutput: true}} {
+	for name, cfg := range map[string]Config{"native": {}, "fallback": {Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}} {
 		t.Run(name, func(t *testing.T) {
 			var payload string
 			cfg.HTTPHooks = chat.HTTPHooks{OnPayload: func(_ context.Context, body []byte) []byte { payload = string(body); return nil }}

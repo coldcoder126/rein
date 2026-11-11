@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"strings"
 
 	goanthropic "github.com/anthropics/anthropic-sdk-go"
@@ -46,16 +47,16 @@ func specFor(model string) modelSpec {
 	return current
 }
 
-// spec returns the spec of the model used by this request; values set explicitly in Config take precedence.
+// spec returns the spec of the model used by this request; values set in Config take precedence, then the endpoint's.
 func (c *Client) spec(model string) modelSpec {
 	s := specFor(model)
-	if c.cfg.MaxInputTokens > 0 {
-		s.maxInput = c.cfg.MaxInputTokens
+	if n := cmp.Or(c.cfg.MaxInputTokens, c.cfg.Endpoint.MaxInputTokens); n > 0 {
+		s.maxInput = n
 	}
-	if c.cfg.MaxOutputTokens > 0 {
-		s.maxOutput = c.cfg.MaxOutputTokens
+	if n := cmp.Or(c.cfg.MaxOutputTokens, c.cfg.Endpoint.MaxOutputTokens); n > 0 {
+		s.maxOutput = n
 	}
-	if c.cfg.BudgetThinking {
+	if c.cfg.Endpoint.Compat.NoAdaptiveThinking {
 		s.budgetThinking = true
 	}
 	return s

@@ -17,7 +17,7 @@ func TestFileScope(t *testing.T) {
 		want string
 	}{
 		{Config{Model: ModelClaudeSonnet5_5}, "anthropic"},
-		{Config{Model: ModelClaudeSonnet5_5, BaseURL: "https://proxy.example.com"}, ""},
+		{Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{BaseURL: "https://proxy.example.com"}}, ""},
 		{Config{Model: ModelClaudeSonnet5_5, FileScope: "anthropic/prod"}, "anthropic/prod"},
 	} {
 		if got := New(tc.cfg).Info().FileScope; got != tc.want {
@@ -58,7 +58,7 @@ func TestUploadFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Model: ModelClaudeSonnet5_5, APIKey: "test", BaseURL: server.URL, FileScope: "test"})
+	client := New(Config{Model: ModelClaudeSonnet5_5, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, FileScope: "test"})
 	block, err := client.UploadFile(context.Background(), "a.pdf", "application/pdf", strings.NewReader("%PDF"), 3600e9)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestUploadFile(t *testing.T) {
 		block.MIMEType != "application/pdf" || block.Name != "a.pdf" {
 		t.Fatalf("wrong block: %+v %+v", block, block.File)
 	}
-	if _, err := New(Config{Model: ModelClaudeSonnet5_5, BaseURL: server.URL}).UploadFile(context.Background(), "a", "text/plain", strings.NewReader(""), 0); err == nil {
+	if _, err := New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{BaseURL: server.URL}}).UploadFile(context.Background(), "a", "text/plain", strings.NewReader(""), 0); err == nil {
 		t.Fatal("an endpoint without a file store should refuse uploads")
 	}
 }

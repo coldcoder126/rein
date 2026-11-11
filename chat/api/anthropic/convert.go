@@ -30,7 +30,7 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 
 	search := c.toolSearchVariant(spec, req.Tools)
 	messages := chat.NormalizeForModel(req.Messages, target, chat.WithToolCallIDNormalizer(normalizeToolCallID))
-	msgs, err := convertMessages(messages, c.cfg.UnsignedThinking, search != "")
+	msgs, err := convertMessages(messages, c.cfg.Endpoint.Compat.NoThinkingSignature, search != "")
 	if err != nil {
 		return goanthropic.MessageNewParams{}, err
 	}
@@ -108,7 +108,7 @@ func (c *Client) bindThinking(params *goanthropic.MessageNewParams, spec modelSp
 	if behavior == "" {
 		behavior = PrefixMismatchDrop
 	}
-	if behavior == PrefixMismatchOff || !spec.thinksByDefault || spec.budgetThinking {
+	if c.cfg.Endpoint.Compat.NoThinkingBinding || !spec.thinksByDefault || spec.budgetThinking {
 		return false
 	}
 	t := &params.Thinking

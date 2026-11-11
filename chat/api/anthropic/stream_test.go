@@ -28,7 +28,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return New(Config{APIKey: "test", BaseURL: server.URL, Model: ModelClaudeSonnet4_6, MaxRetries: 0})
+	return New(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: ModelClaudeSonnet4_6, MaxRetries: 0})
 }
 
 func serveSSE(body string) http.HandlerFunc {
@@ -198,7 +198,7 @@ func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
 		want  []string
 	}{
 		{ModelClaudeSonnet5_5, Config{Headers: map[string]string{"anthropic-beta": "other-beta"}}, []string{"other-beta", prefixMismatchBeta}},
-		{ModelClaudeSonnet5_5, Config{PrefixMismatch: PrefixMismatchOff}, nil},
+		{ModelClaudeSonnet5_5, Config{Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, nil},
 		{ModelClaudeSonnet4_6, Config{}, nil},
 	}
 	for _, tc := range cases {
@@ -208,7 +208,7 @@ func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
 			serveSSE(sse(ev("message_start", messageStart), ev("message_stop", `{"type":"message_stop"}`)))(w, r)
 		}))
 		cfg := tc.cfg
-		cfg.APIKey, cfg.BaseURL, cfg.Model = "test", server.URL, tc.model
+		cfg.APIKey, cfg.Endpoint.BaseURL, cfg.Model = "test", server.URL, tc.model
 		for range New(cfg).Stream(t.Context(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
 		}
 		server.Close()

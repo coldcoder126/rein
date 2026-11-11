@@ -55,7 +55,7 @@ The full program is in [examples/quickstart](examples/quickstart).
 
 | Package | Responsibility |
 |---|---|
-| `chat` | Model protocol: messages, stream events, errors, structured output, model middleware; providers live in `chat/provider/*` |
+| `chat` | Model protocol: messages, stream events, errors, structured output, model middleware; one package per protocol in `chat/api/*` |
 | `tool` | Tool interface, execution context, results, typed tools, toolsets |
 | `agent` | The Agent definition and its loop; sub-agents as a tool |
 | `session` | Sessions and messages, the store interface, an in-memory store |
@@ -67,10 +67,9 @@ Define tools → put them in an `agent.Agent` → hand the Agent and a store to 
 
 | Package | Description |
 |---|---|
-| [`chat/provider/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/anthropic) | Anthropic Messages API and compatible endpoints |
-| [`chat/provider/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/openai) | OpenAI Responses API and compatible endpoints |
-| [`chat/provider/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/gemini) | Google Gemini |
-| [`chat/provider/deepseek`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/provider/deepseek) | DeepSeek |
+| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API and compatible endpoints (DeepSeek preset) |
+| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API and compatible endpoints (DeepSeek preset) |
+| [`chat/api/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/gemini) | Google Gemini |
 | [`chat/imageproc`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/imageproc) | Normalizing images (format, size) before they enter history |
 | [`tool/skill`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/skill) | Skills: instructions and resources loaded on demand |
 | [`tool/todo`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/todo) | A checklist the model keeps for multi-step tasks |

@@ -17,7 +17,7 @@ func newTestClient(t *testing.T, cfg Config, handler http.HandlerFunc) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	cfg.APIKey, cfg.BaseURL = "test", server.URL+"/"
+	cfg.APIKey, cfg.Endpoint.BaseURL = "test", server.URL+"/"
 	return New(cfg)
 }
 
@@ -128,7 +128,7 @@ func TestStreamFullResponseWithAllItemTypes(t *testing.T) {
 func TestStreamReconcilesItemsWithoutDoneEvents(t *testing.T) {
 	// Endpoints that omit output_item.done (such as DeepSeek): items are filled in from the final output of response.completed.
 	deepseekReasoning := `{"id":"rs_ds","type":"reasoning","content":[{"type":"reasoning_text","text":"明文推理"}]}`
-	client := newTestClient(t, Config{Model: ModelGPT6Luna, DisableStoreParams: true}, serveEvents(
+	client := newTestClient(t, Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoStoreParams: true}}}, serveEvents(
 		ev("response.created", created),
 		ev("response.output_item.added", `"output_index":0,"item":{"id":"rs_ds","type":"reasoning"}`),
 		ev("response.reasoning_text.delta", `"item_id":"rs_ds","output_index":0,"content_index":0,"delta":"明文"`),

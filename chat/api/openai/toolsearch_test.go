@@ -39,7 +39,7 @@ func TestDeferredToolsUseHostedToolSearch(t *testing.T) {
 	}
 
 	for name, client := range map[string]*Client{
-		"disabled": New(Config{Model: ModelGPT6Luna, DisableToolSearch: true}),
+		"disabled": New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}),
 	} {
 		tools := paramsBody(t, client, req).Tools
 		if len(tools) != 2 || tools[1]["defer_loading"] != nil {
@@ -74,7 +74,7 @@ func TestToolSearchItemsAreReplayedVerbatim(t *testing.T) {
 		t.Fatalf("search items should be sent back unchanged in place: %s", input)
 	}
 
-	input = paramsBody(t, New(Config{Model: ModelGPT6Luna, DisableToolSearch: true}), chat.Request{Messages: history, Tools: searchTools}).Input
+	input = paramsBody(t, New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}), chat.Request{Messages: history, Tools: searchTools}).Input
 	for _, item := range input {
 		if strings.Contains(string(item), "tool_search") {
 			t.Fatalf("without tool search the items are left out: %s", input)

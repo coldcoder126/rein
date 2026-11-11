@@ -58,7 +58,7 @@ func TestToolSearchIsSkippedWhenUnavailable(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
 	for name, client := range map[string]*Client{
 		"off":              New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}),
-		"non-claude":       New(Config{Model: "deepseek-v4-pro", BaseURL: "http://example.invalid"}),
+		"non-claude":       New(Config{Model: "deepseek-v4-pro", Endpoint: Endpoint{BaseURL: "http://example.invalid"}}),
 		"older model":      New(Config{Model: "claude-3-7-sonnet"}),
 		"nothing to defer": New(Config{Model: ModelClaudeSonnet5_5}),
 	} {

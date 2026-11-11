@@ -21,10 +21,10 @@ const (
 )
 
 func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, error) {
-	if c.cfg.NoStructuredOutput {
+	if c.cfg.Endpoint.Compat.NoStructuredOutput {
 		req = chat.WithOutputInstructions(req)
 	}
-	search := !c.cfg.DisableToolSearch && slices.ContainsFunc(req.Tools, func(def chat.ToolDef) bool { return def.Deferred })
+	search := !c.cfg.Endpoint.Compat.NoToolSearch && slices.ContainsFunc(req.Tools, func(def chat.ToolDef) bool { return def.Deferred })
 	input, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)), search)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
@@ -62,7 +62,7 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 			"type": "json_schema", "name": name, "schema": schema, "strict": true,
 		}}
 	}
-	if !c.cfg.DisableStoreParams {
+	if !c.cfg.Endpoint.Compat.NoStoreParams {
 		params.Store = param.NewOpt(false)
 		if c.cfg.Reasoning {
 			extra["include"] = []string{"reasoning.encrypted_content"}

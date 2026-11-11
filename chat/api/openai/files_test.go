@@ -17,7 +17,7 @@ func TestFileScope(t *testing.T) {
 		want string
 	}{
 		{Config{Model: ModelGPT6Luna}, "openai"},
-		{Config{Model: ModelGPT6Luna, BaseURL: "https://api.deepseek.com"}, ""},
+		{Config{Model: ModelGPT6Luna, Endpoint: Endpoint{BaseURL: "https://api.deepseek.com"}}, ""},
 		{Config{Model: ModelGPT6Luna, FileScope: "openai/prod"}, "openai/prod"},
 	} {
 		if got := New(tc.cfg).Info().FileScope; got != tc.want {
@@ -52,7 +52,7 @@ func TestUploadFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Model: ModelGPT6Luna, APIKey: "test", BaseURL: server.URL + "/", FileScope: "test"})
+	client := New(Config{Model: ModelGPT6Luna, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL + "/"}, FileScope: "test"})
 	block, err := client.UploadFile(context.Background(), "a.pdf", "application/pdf", strings.NewReader("%PDF"), 3600e9)
 	if err != nil {
 		t.Fatal(err)

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/coldcoder126/rein/agent"
-	"github.com/coldcoder126/rein/chat/provider/anthropic"
+	"github.com/coldcoder126/rein/chat/api/anthropic"
 	"github.com/coldcoder126/rein/runner"
 	"github.com/coldcoder126/rein/session"
 	"github.com/coldcoder126/rein/tool"

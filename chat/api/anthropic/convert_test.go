@@ -275,13 +275,13 @@ func TestInfoReportsImageSupport(t *testing.T) {
 	if !info.SupportsMedia || info.ImageLimits.MaxBytes == 0 {
 		t.Fatalf("should support media by default and give image specs: %+v", info)
 	}
-	if New(Config{Model: ModelClaudeSonnet5_5, TextOnly: true}).Info().SupportsMedia {
+	if New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
 		t.Fatal("TextOnly should turn media support off")
 	}
 }
 
 func TestBuildParamsReplacesImagesForTextOnlyEndpoint(t *testing.T) {
-	client := New(Config{Model: ModelClaudeSonnet5_5, TextOnly: true})
+	client := New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{{
 		Role:    chat.RoleUser,
 		Content: []chat.ContentBlock{chat.Text("看图"), imageBlock("image/png")},
@@ -321,7 +321,7 @@ func TestBuildParamsReasoning(t *testing.T) {
 	}{
 		{"default thinking is stated to carry the block binding", Config{Model: ModelClaudeSonnet5_5}, chat.Options{},
 			[]string{`"thinking":{"type":"adaptive",` + `"block_binding":{"prefix_mismatch_behavior":"drop_block"}` + `}`}, []string{`"output_config"`}},
-		{"no thinking parameters with the binding off", Config{Model: ModelClaudeSonnet5_5, PrefixMismatch: PrefixMismatchOff}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
+		{"no thinking parameters with the binding off", Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
 		{"the binding can reject instead", Config{Model: ModelClaudeOpus5_5, PrefixMismatch: PrefixMismatchError}, chat.Options{},
 			[]string{`"prefix_mismatch_behavior":"error"`}, nil},
 		{"adaptive models use effort", Config{Model: ModelClaudeSonnet5_5}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},

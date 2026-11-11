@@ -65,7 +65,7 @@ func TestBuildParamsReasoningImageGenerationAndDisabledStoreParams(t *testing.T)
 		}
 	}
 
-	got = marshal(t, mustParams(t, New(Config{Model: ModelGPT6Luna, Reasoning: true, DisableStoreParams: true}), req))
+	got = marshal(t, mustParams(t, New(Config{Model: ModelGPT6Luna, Reasoning: true, Endpoint: Endpoint{Compat: Compat{NoStoreParams: true}}}), req))
 	if strings.Contains(got, `"store"`) || strings.Contains(got, `"include"`) {
 		t.Fatalf("DisableStoreParams should not send store/include: %s", got)
 	}
@@ -177,7 +177,7 @@ func TestToolOutputWithImagesUsesContentArray(t *testing.T) {
 }
 
 func TestReplayDropsFailedMessagesAndReplacesUnsupportedImages(t *testing.T) {
-	client := New(Config{Model: ModelGPT6Luna, TextOnly: true})
+	client := New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("x")}}},
 		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "gpt-6-luna", StopReason: chat.StopReasonError, Content: []chat.ContentBlock{chat.Text("半截")}},
@@ -227,7 +227,7 @@ func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 }
 
 func TestInfoImageReplayFollowsTextOnly(t *testing.T) {
-	if !New(Config{Model: ModelGPT6Luna}).Info().ImageOutput || New(Config{Model: ModelGPT6Luna, TextOnly: true}).Info().ImageOutput {
+	if !New(Config{Model: ModelGPT6Luna}).Info().ImageOutput || New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().ImageOutput {
 		t.Fatal("ImageOutput should be off with TextOnly")
 	}
 }
@@ -245,7 +245,7 @@ func TestBuildParamsStructuredOutput(t *testing.T) {
 	if got := marshal(t, params); !strings.Contains(got, `"text":{"format":{"name":"city","schema":{"type":"object"},"strict":true,"type":"json_schema"}}`) {
 		t.Fatalf("should use the native json_schema format: %s", got)
 	}
-	params, err = New(Config{Model: ModelGPT6Luna, NoStructuredOutput: true}).buildParams(req)
+	params, err = New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}).buildParams(req)
 	if err != nil {
 		t.Fatal(err)
 	}
