@@ -8,6 +8,7 @@ import (
 
 	"github.com/coldcoder126/rein/chat"
 	"github.com/coldcoder126/rein/session"
+	"github.com/coldcoder126/rein/session/storetest"
 )
 
 func TestFromChat(t *testing.T) {
@@ -86,4 +87,8 @@ func TestMessageJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil || back.Type != session.TypeSummary || back.FirstKeptID != "m1" || back.Text() != "摘要" {
 		t.Fatalf("message read back differs: %+v, %v", back, err)
 	}
+}
+
+func TestMemoryStoreConformance(t *testing.T) {
+	storetest.Run(t, func(*testing.T) session.Store { return session.NewMemoryStore() })
 }

@@ -489,3 +489,79 @@ func TestCutIndexAndEffectiveMessages(t *testing.T) {
 		t.Fatalf("should be the summary, the kept messages and the new messages: %v fresh=%d", ids, fresh)
 	}
 }
+
+// countingStore counts the reads of a store. Embedding the interface hides session.TailLister, as a wrapper would.
+type countingStore struct {
+	session.Store
+	lists int
+}
+
+func (s *countingStore) ListMessages(ctx context.Context, id string) ([]session.Message, error) {
+	s.lists++
+	return s.Store.ListMessages(ctx, id)
+}
+
+// tailStore additionally offers session.TailLister and records the types of the messages last loaded through it.
+type tailStore struct {
+	countingStore
+	tails  int
+	loaded []string
+}
+
+func (s *tailStore) ListTail(ctx context.Context, id string) ([]session.Message, error) {
+	s.tails++
+	messages, err := s.Store.(session.TailLister).ListTail(ctx, id)
+	s.loaded = nil
+	for _, msg := range messages {
+		s.loaded = append(s.loaded, string(msg.Type))
+	}
+	return messages, err
+}
+
+// A run reads the store once however many turns and compactions it has, and from the latest summary when the store can.
+func TestRunReadsTheStoreOnce(t *testing.T) {
+	scripts := func() []chattest.Script {
+		return []chattest.Script{
+			sayWithUsage("回答一", 100),
+			callWithUsage(850),
+			chattest.Say("运行中途的摘要"),
+			sayWithUsage("最终回答", 200),
+			sayWithUsage("回答三", 250),
+		}
+	}
+	plain := &countingStore{Store: session.NewMemoryStore()}
+	h, client, _ := compactRunner(t, 1000, scripts()...)
+	h.store = plain
+	submit(t, h, long("问题一"))
+	if plain.lists != 1 {
+		t.Fatalf("a run should read the store once, got %d", plain.lists)
+	}
+	result := submit(t, h, long("问题二"))
+	if plain.lists != 2 || result.Final.Text() != "最终回答" {
+		t.Fatalf("a run with a compaction should still read once: %d %q", plain.lists, result.Final.Text())
+	}
+	want := requestText(client.Requests()[3])
+
+	tail := &tailStore{countingStore: countingStore{Store: session.NewMemoryStore()}}
+	h, client, _ = compactRunner(t, 1000, scripts()...)
+	h.store = tail
+	submit(t, h, long("问题一"))
+	submit(t, h, long("问题二"))
+	if tail.lists != 0 || tail.tails != 2 {
+		t.Fatalf("a TailLister store should be read through ListTail, once per run: %d %d", tail.lists, tail.tails)
+	}
+	if got := requestText(client.Requests()[3]); got != want {
+		t.Fatalf("both ways of loading should send the same conversation:\n%s\n%s", got, want)
+	}
+	submit(t, h, "问题三")
+	// The third run loads from the message the summary keeps: the first exchange is no longer read.
+	if got := strings.Join(tail.loaded, " "); got != "user assistant tool summary assistant user" {
+		t.Fatalf("the run after a compaction should load only the tail, got: %s", got)
+	}
+	if all := saved(t, tail.Store, "c"); tail.lists != 0 || len(all) <= len(tail.loaded) {
+		t.Fatalf("the whole session (%d messages) should stay in the store, unread by the runs: %d", len(all), tail.lists)
+	}
+	if got := requestText(client.Requests()[4]); strings.Contains(got, "问题一") || !strings.Contains(got, "运行中途的摘要") || !strings.HasSuffix(got, "问题三") {
+		t.Fatalf("the run after a compaction should see the summary and the kept messages: %s", got)
+	}
+}

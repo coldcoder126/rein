@@ -266,6 +266,10 @@ type runState struct {
 	// before the message with the ID contextBefore (see mergeRunContext).
 	runContext    []session.Message
 	contextBefore string
+	// history are the session's messages as loaded from the store on first use (see messages) plus those this run stored since.
+	// While a session is occupied its run is the only writer, so the store is read once per run.
+	history []session.Message
+	loaded  bool
 	// recovered means this run has already recovered from one context overflow; another overflow is not compacted and retried.
 	recovered bool
 }
@@ -460,12 +464,32 @@ func (st *runState) services(ctx context.Context) context.Context {
 
 // buildMessages loads the history from the store and converts it into model-visible messages, applying the latest summary and merging this run's context.
 func (st *runState) buildMessages(ctx context.Context) ([]chat.Message, error) {
-	all, err := st.r.store.ListMessages(ctx, st.info.SessionID)
+	all, err := st.messages(ctx)
 	if err != nil {
 		return nil, err
 	}
 	messages, _ := effectiveMessages(all)
 	return st.chatMessages(ctx, messages, true)
+}
+
+// messages returns the session's messages that can still enter the model context: everything, or with a session.TailLister
+// store only what the latest compaction left. The store is read on the first call; later calls return that plus the messages
+// this run stored since. The result is shared and must not be modified.
+func (st *runState) messages(ctx context.Context) ([]session.Message, error) {
+	if st.loaded {
+		return st.history, nil
+	}
+	var err error
+	if tail, ok := st.r.store.(session.TailLister); ok {
+		st.history, err = tail.ListTail(ctx, st.info.SessionID)
+	} else {
+		st.history, err = st.r.store.ListMessages(ctx, st.info.SessionID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	st.loaded = true
+	return st.history, nil
 }
 
 // chatMessages converts effective session messages into model-visible messages, merging this run's context when withContext is set.
@@ -545,6 +569,9 @@ func (st *runState) save(ctx context.Context, messages ...session.Message) error
 	}
 	if err := st.r.store.AppendMessages(ctx, st.info.SessionID, messages...); err != nil {
 		return err
+	}
+	if st.loaded {
+		st.history = append(st.history, messages...)
 	}
 	for _, msg := range messages {
 		msg := msg.Clone()

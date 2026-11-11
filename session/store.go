@@ -19,6 +19,7 @@ type Session struct {
 }
 
 // Store is the session store interface, which can be backed by a database and so on. Its methods are called concurrently for many sessions.
+// It does not gain methods: further capabilities are optional interfaces such as TailLister. The storetest package checks an implementation.
 type Store interface {
 	// EnsureSession creates the session if it does not exist and does nothing otherwise.
 	EnsureSession(ctx context.Context, session Session) error
@@ -29,6 +30,36 @@ type Store interface {
 	AppendMessages(ctx context.Context, sessionID string, messages ...Message) error
 	// ListMessages returns all messages of the session in append order.
 	ListMessages(ctx context.Context, sessionID string) ([]Message, error)
+}
+
+// TailLister is an optional interface for stores that can read a session without the part compaction has replaced.
+// The runner uses it when the store implements it and falls back to ListMessages otherwise, so it only saves reading:
+// a long session is then loaded from its latest summary instead of from its first message.
+//
+// A store wrapped by another type (for logging, metrics and so on) only keeps it when the wrapper forwards it.
+type TailLister interface {
+	// ListTail returns what Tail returns for the session's messages, in append order.
+	ListTail(ctx context.Context, sessionID string) ([]Message, error)
+}
+
+// Tail returns the messages still used after the latest compaction: from the first message the latest summary keeps
+// (Message.FirstKeptID) to the end, or from that summary when the kept message is not found. Without a summary it returns all.
+func Tail(all []Message) []Message {
+	last := -1
+	for i, msg := range all {
+		if msg.Type == TypeSummary {
+			last = i
+		}
+	}
+	if last < 0 {
+		return all
+	}
+	for i, msg := range all[:last] {
+		if msg.ID == all[last].FirstKeptID {
+			return all[i:]
+		}
+	}
+	return all[last:]
 }
 
 // DisplayMessages returns the messages to show to the user (those with Visible set).

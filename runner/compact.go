@@ -16,6 +16,7 @@ import (
 type CompactInput struct {
 	// Messages are the session messages currently in the model context, with earlier summaries applied:
 	// when there is a summary it comes first, followed by the kept messages and those added since.
+	// They are shared with the run and read-only: a Compactor must not modify their content.
 	Messages []session.Message
 	// Tokens is the estimated context usage, and MaxInputTokens the model's context limit.
 	Tokens         int
@@ -375,13 +376,13 @@ func (st *runState) compact(ctx context.Context, reason CompactReason, instructi
 	if r.compactor == nil || (limit <= 0 && reason != CompactManual) {
 		return nil, nil
 	}
-	all, err := r.store.ListMessages(ctx, st.info.SessionID)
+	all, err := st.messages(ctx)
 	if err != nil {
 		return nil, err
 	}
 	messages, fresh := effectiveMessages(all)
 	in := CompactInput{
-		Messages:       session.CloneMessages(messages),
+		Messages:       slices.Clone(messages),
 		Tokens:         estimateContext(messages, fresh, r.agent.Instruction),
 		MaxInputTokens: max(limit, 0),
 		Reason:         reason,

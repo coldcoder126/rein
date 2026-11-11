@@ -250,6 +250,8 @@ Skills are focused instructions for the model, optionally with resource files. T
 - `Message`: a session message, with its role (user, assistant, tool, business context, summary), UI visibility, source, business kind and lifetime. The content is stored once, in `ChatMessage`: assistant and tool messages are the raw messages produced by the model (thinking, tool calls, signatures, usage) and are replayed as is, while other roles only use its content blocks. `Text()` gives the display text and `Content()` the content blocks. `Source` and `Kind` belong entirely to the business layer; the framework does not depend on their values.
 - `Session`: session metadata. A non-empty `ParentID` means the session belongs to a sub-task rather than a conversation the user created, and listings of the user's sessions should usually exclude it.
 - `Store`: four methods (ensure a session exists, get a session, append messages, list messages); `MemoryStore` is the in-memory implementation.
+- `TailLister`: an optional interface for stores that can read a session from its latest summary (`session.Tail` defines exactly which messages); the runner uses it when present, so a long session is not loaded from its first message. `MemoryStore` implements it.
+- `session/storetest`: conformance checks for a store implementation; its tests call `storetest.Run`.
 - `DisplayMessages` filters the messages shown to the user.
 
 ## runner
@@ -302,7 +304,8 @@ Long sessions run into the model's context limit. The Runner decides when and ho
 - `Compactor` is the strategy interface: it takes the session messages currently in the context, the estimated usage and the model limit, and returns a summary plus the message where the kept part starts, or nil for no compaction. Implementing it replaces the strategy entirely; `DisableCompaction` turns it off.
 - The default strategy `SummaryCompactor` (on by default) triggers above 80% of the limit, keeps the most recent messages worth about 20% of the limit as they are, and has the model summarize the earlier part. The cut prefers user messages and never separates a tool call from its result. The trigger ratio, keep ratio, summary prompt, summary model and summary request parameters are all configurable; the summary outputs at most 4096 tokens by default.
 - The summary reuses the conversation's prompt cache. `CompactInput.Continue` sends the conversation as the model saw it, followed by the summary instructions, as a side call: the same system prompt, tools, options and messages, through the same middlewares, with only `MaxTokens` changed. The model sees the whole conversation and is asked to focus on what comes before the kept messages. Only a separate summary model (`SummaryCompactor.Client`) gets a plain text transcript of the part being cut, which no cache covers.
-- The conversation is rebuilt from the store as the messages from the latest summary up to an end message, so it matches what was sent. Mid-run it ends at the newest message, as the next turn would send it; otherwise it ends at the last assistant message whose model call succeeded, whose input is cached and whose input and output are known to fit: before the first turn (the conversation as the previous run left it, without the new input), on overflow (dropping what overflowed) and for manual compaction. The kept part never starts after the end message. Run-scoped context stays where the run first placed it.
+- A run reads the session from the store once, when it starts, and afterwards works from that copy plus the messages it stored itself: while a session is occupied its run is the only writer. Messages written to the store by other means during a run are seen by the next run. A `Compactor` gets these messages shared and must treat them as read-only.
+- The conversation is rebuilt from those messages as the messages from the latest summary up to an end message, so it matches what was sent. Mid-run it ends at the newest message, as the next turn would send it; otherwise it ends at the last assistant message whose model call succeeded, whose input is cached and whose input and output are known to fit: before the first turn (the conversation as the previous run left it, without the new input), on overflow (dropping what overflowed) and for manual compaction. The kept part never starts after the end message. Run-scoped context stays where the run first placed it.
 - It is called automatically before each turn of a run, and when a turn fails because the context was exceeded it forces a compaction and recovers that turn within the same run, calling the model again with the compacted history, at most once per run. So one runner run always calls `Agent.Run` exactly once. `CompactInput.Reason` tells these cases and manual compaction apart. A second overflow, or a failing summary request, ends the run with the error.
 - Manual compaction: the business layer calls `Runner.Compact` when the user asks for it, optionally with extra requirements for the summary and the model to summarize with (usually the session's current model), and gets the summary message and the tokens consumed generating it. It only works while the session is idle, and is a run of its own meanwhile: `run_start`, the stored summary (`message_saved`, `compaction`) and `run_end`. The default strategy then ignores the threshold and cuts by the overflow rules; manual compaction also works when the model declares no context limit.
 - Usage is estimated from the real usage of the latest assistant message after the summary, with the messages after it estimated roughly by bytes. There is no automatic compaction when the model declares no context limit.
@@ -320,6 +323,15 @@ Every event of a run is kept in memory with the `Run`, and `TextDelta()` / `Thin
 Events live in the process that runs them: following a run from another instance, or after a restart, belongs to the business layer.
 
 Not implemented yet: session trees, JSONL storage, session-level key-value state, and pausing and resuming across processes.
+
+## Extending rein
+
+The interfaces a user of the framework implements are kept minimal and do not gain methods: `chat.Client`, `tool.Tool`, `tool.Toolset`, `session.Store`, `runner.MessageConverter`, `runner.Compactor` and `shell.Executor`. They evolve in two ways only:
+
+- A new capability is an optional interface in the same package (`tool.Sequential`, `tool.Timeouter`, `tool.Instructor`, `session.TailLister`). The framework detects it with a type assertion and otherwise takes a default path on the base interface, which is correct but may be slower.
+- Inputs and results are structs, and a new field's zero value means the previous behavior.
+
+A type that wraps one of these interfaces (a store with logging, a tool with metrics) hides the optional interfaces of what it wraps unless it forwards them.
 
 ## Experimental x
 

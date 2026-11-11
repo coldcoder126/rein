@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+var _ TailLister = (*MemoryStore)(nil)
+
 // MemoryStore is an in-memory Store, suited to tests and lightweight single-process use.
 type MemoryStore struct {
 	mu       sync.Mutex
@@ -62,4 +64,14 @@ func (s *MemoryStore) ListMessages(_ context.Context, sessionID string) ([]Messa
 		return nil, ErrNotFound
 	}
 	return CloneMessages(s.messages[sessionID]), nil
+}
+
+// ListTail implements TailLister.
+func (s *MemoryStore) ListTail(_ context.Context, sessionID string) ([]Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions[sessionID]; !ok {
+		return nil, ErrNotFound
+	}
+	return CloneMessages(Tail(s.messages[sessionID])), nil
 }
