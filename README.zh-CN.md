@@ -23,7 +23,10 @@ rein 是一个用 Go 构建 LLM Agent 的框架，提供 Agent 循环、工具�
 
 ```sh
 go get github.com/coldcoder126/rein
+go get github.com/coldcoder126/rein/chat/api/anthropic
 ```
+
+核心 module 只依赖 JSON Schema 处理。每种模型协议（`chat/api/anthropic`、`chat/api/openai`、`chat/api/gemini`）以及 `tool/mcp`、`chat/imageproc` 各自是独立的 module，版本号一致，只会拉取你用到的 SDK。
 
 ## 快速开始
 

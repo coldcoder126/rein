@@ -27,20 +27,24 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "Run gofmt on:"; echo "$unformatted"; exit 1
           fi
+      # The repository holds several modules (see docs/architecture.md); every step runs in each of them.
       - name: go mod tidy
-        run: go mod tidy && git diff --exit-code go.mod go.sum
+        run: scripts/modules.sh go mod tidy && git diff --exit-code
       - name: go vet
-        run: go vet ./...
+        run: scripts/modules.sh go vet ./...
       - name: go test
         # Real model integration tests skip themselves unless REIN_INTEGRATION=1.
-        run: go test -race ./...
+        run: scripts/modules.sh go test -race ./...
       - name: build for Windows
-        run: GOOS=windows go build ./...
+        run: GOOS=windows scripts/modules.sh go build ./...
 
   vulncheck:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: golang/govulncheck-action@v1
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version-input: stable
+          go-version: stable
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: scripts/modules.sh govulncheck ./...

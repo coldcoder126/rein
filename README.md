@@ -23,7 +23,10 @@ rein is a Go framework for building LLM agents: the agent loop, tools, sessions 
 
 ```sh
 go get github.com/coldcoder126/rein
+go get github.com/coldcoder126/rein/chat/api/anthropic
 ```
+
+The core module depends on nothing but JSON Schema handling. Each model protocol (`chat/api/anthropic`, `chat/api/openai`, `chat/api/gemini`), `tool/mcp` and `chat/imageproc` is a module of its own with the same version, so you only pull the SDKs you use.
 
 ## Quick start
 

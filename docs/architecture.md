@@ -11,6 +11,12 @@ rein is an agent framework for Go. A model by itself is just a function from tex
 | `session` | Persistence model of sessions and messages, store interface, in-memory store | `chat` |
 | `runner` | Runtime: loads history per session, drives the Agent, persistence, queues, compaction, events | `agent`, `session` |
 
+## Modules
+
+The repository holds several Go modules with one shared version. The root module is the core (everything in the table above, plus `chat/chattest`, `session/storetest` and `x/`) and depends only on JSON Schema libraries. Each of `chat/api/anthropic`, `chat/api/openai`, `chat/api/gemini`, `tool/mcp` and `chat/imageproc` is a module of its own carrying its SDK, so a user pulls only what they import; `examples` is a module that is not released.
+
+The modules find one another through `replace` directives, which only apply inside this repository. `scripts/modules.sh` runs a command in every module (CI uses it), and `scripts/release.sh vX.Y.Z` sets the versions the modules require of one another and prints the tags to create, all on one commit: the root's `vX.Y.Z` and `<module path>/vX.Y.Z` for each sub-module. Between releases the sub-modules require `v0.0.0` of the others and only build inside the repository.
+
 Putting it together: define some tools and toolsets → put them in an `agent.Agent` → hand the Agent and a store to a `runner.Runner` → call `Start` with a session ID. Without sessions you can call `Agent.Run` directly.
 
 ## chat
