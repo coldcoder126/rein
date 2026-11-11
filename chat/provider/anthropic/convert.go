@@ -69,6 +69,10 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 	if err != nil {
 		return goanthropic.MessageNewParams{}, err
 	}
+	// An explicit temperature is kept when thinking was left unset, so it is not stated there.
+	if thinking || req.Temperature == nil {
+		thinking = c.bindThinking(&params, spec) || thinking
+	}
 	// The API does not accept a custom temperature with thinking on.
 	if req.Temperature != nil && !thinking {
 		params.Temperature = goanthropic.Float(*req.Temperature)
@@ -94,6 +98,45 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 		}
 	}
 	return params, nil
+}
+
+// bindThinking sets thinking.block_binding on models that think by default, so a replayed thinking block whose conversation
+// changed is handled as Config.PrefixMismatch says, and reports whether it did. Thinking left unset is sent as adaptive, which
+// is what those models do anyway, to give the setting a place; disabled thinking cannot carry it.
+func (c *Client) bindThinking(params *goanthropic.MessageNewParams, spec modelSpec) bool {
+	behavior := c.cfg.PrefixMismatch
+	if behavior == "" {
+		behavior = PrefixMismatchDrop
+	}
+	if behavior == PrefixMismatchOff || !spec.thinksByDefault || spec.budgetThinking {
+		return false
+	}
+	t := &params.Thinking
+	if t.OfAdaptive == nil && t.OfEnabled == nil && t.OfDisabled == nil {
+		t.OfAdaptive = &goanthropic.ThinkingConfigAdaptiveParam{}
+	}
+	binding := map[string]any{"block_binding": map[string]any{"prefix_mismatch_behavior": string(behavior)}}
+	switch {
+	case t.OfAdaptive != nil:
+		t.OfAdaptive.SetExtraFields(binding)
+	case t.OfEnabled != nil:
+		t.OfEnabled.SetExtraFields(binding)
+	default:
+		return false
+	}
+	return true
+}
+
+// blockBound reports whether params carry thinking.block_binding, which needs the beta header.
+func blockBound(params goanthropic.MessageNewParams) bool {
+	t := params.Thinking
+	switch {
+	case t.OfAdaptive != nil:
+		return t.OfAdaptive.ExtraFields()["block_binding"] != nil
+	case t.OfEnabled != nil:
+		return t.OfEnabled.ExtraFields()["block_binding"] != nil
+	}
+	return false
 }
 
 // markLastBlock puts a cache breakpoint on the last block of the last user message, making the whole history a cacheable prefix.

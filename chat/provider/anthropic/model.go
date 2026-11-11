@@ -23,11 +23,14 @@ type modelSpec struct {
 	structuredOutput bool
 	// toolSearch means the model supports the server-side tool search, which deferred tools need.
 	toolSearch bool
+	// thinksByDefault means the model thinks when the request sets no thinking (Claude 5 and later). These models accept
+	// thinking.block_binding, and some bind thinking blocks to the conversation that produced them.
+	thinksByDefault bool
 }
 
 // specFor returns the spec for a model name. Unknown Claude models are treated as the latest generation; non-Claude models (compatible endpoints) get conservative values.
 func specFor(model string) modelSpec {
-	current := modelSpec{maxInput: 1_000_000, maxOutput: 128_000, structuredOutput: true, toolSearch: true}
+	current := modelSpec{maxInput: 1_000_000, maxOutput: 128_000, structuredOutput: true, toolSearch: true, thinksByDefault: !strings.Contains(model, "-4-")}
 	switch {
 	case !strings.HasPrefix(model, "claude-"):
 		return modelSpec{maxInput: 200_000, maxOutput: 8_192, budgetThinking: true}

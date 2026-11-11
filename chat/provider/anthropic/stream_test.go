@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -187,5 +188,32 @@ func TestStreamCancellationIsAborted(t *testing.T) {
 	final := events[len(events)-1]
 	if final.Type != chat.EventError || final.Reason != chat.StopReasonAborted || !errors.Is(final.Err, chat.ErrAborted) {
 		t.Fatalf("cancellation should end with aborted: %+v", final)
+	}
+}
+
+func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
+	cases := []struct {
+		model string
+		cfg   Config
+		want  []string
+	}{
+		{ModelClaudeSonnet5_5, Config{Headers: map[string]string{"anthropic-beta": "other-beta"}}, []string{"other-beta", prefixMismatchBeta}},
+		{ModelClaudeSonnet5_5, Config{PrefixMismatch: PrefixMismatchOff}, nil},
+		{ModelClaudeSonnet4_6, Config{}, nil},
+	}
+	for _, tc := range cases {
+		var got []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.Header.Values("anthropic-beta")
+			serveSSE(sse(ev("message_start", messageStart), ev("message_stop", `{"type":"message_stop"}`)))(w, r)
+		}))
+		cfg := tc.cfg
+		cfg.APIKey, cfg.BaseURL, cfg.Model = "test", server.URL, tc.model
+		for range New(cfg).Stream(t.Context(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
+		}
+		server.Close()
+		if !slices.Equal(got, tc.want) {
+			t.Fatalf("%s %+v: anthropic-beta = %v, want %v", tc.model, tc.cfg, got, tc.want)
+		}
 	}
 }

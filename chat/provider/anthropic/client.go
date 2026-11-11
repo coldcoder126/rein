@@ -62,6 +62,9 @@ type Config struct {
 	// ToolSearch picks the server-side tool search used when a request has deferred tools (chat.ToolDef.Deferred):
 	// ToolSearchRegex by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
 	ToolSearch ToolSearch
+	// PrefixMismatch says what the API does with a replayed thinking block whose conversation changed since it was produced,
+	// on models that bind thinking to the conversation: PrefixMismatchDrop by default.
+	PrefixMismatch PrefixMismatch
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
 	FileScope string
@@ -82,6 +85,24 @@ const (
 	// ToolSearchOff disables tool search: deferred tools are sent up front like any other.
 	ToolSearchOff ToolSearch = "off"
 )
+
+// PrefixMismatch is the handling of a replayed thinking block that fails the API's conversation check: the system prompt,
+// tools or earlier messages changed since the block was produced, for example after compaction or when run-scoped context
+// is left out of later runs. Enforced accounts reject such a request by default.
+type PrefixMismatch string
+
+const (
+	// PrefixMismatchDrop has the API drop the failing blocks and answer without that reasoning; it is the default.
+	// In testing only the stale blocks were dropped: those produced after the change stayed valid.
+	PrefixMismatchDrop PrefixMismatch = "drop_block"
+	// PrefixMismatchError rejects the request, for finding where history is edited.
+	PrefixMismatchError PrefixMismatch = "error"
+	// PrefixMismatchOff sends no setting and no beta header, for endpoints that do not accept them; the account's default applies.
+	PrefixMismatchOff PrefixMismatch = "off"
+)
+
+// prefixMismatchBeta is the beta that allows setting thinking.block_binding.
+const prefixMismatchBeta = "thinking-binding-controls-2026-08-01"
 
 // Client wraps the Anthropic SDK.
 type Client struct {
@@ -114,7 +135,11 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
 			return
 		}
-		stream := client.Messages.NewStreaming(ctx, params)
+		var opts []option.RequestOption
+		if blockBound(params) {
+			opts = append(opts, option.WithHeaderAdd("anthropic-beta", prefixMismatchBeta))
+		}
+		stream := client.Messages.NewStreaming(ctx, params, opts...)
 		defer stream.Close()
 
 		var usage goanthropic.Usage
