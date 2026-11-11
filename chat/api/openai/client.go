@@ -66,17 +66,17 @@ type Client struct {
 	cfg Config
 }
 
-// New creates a Responses API chat.Client. It panics when cfg.Model is empty.
-func New(cfg Config) *Client {
+// New creates a Responses API chat.Client. It returns an error when cfg.Model is empty.
+func New(cfg Config) (*Client, error) {
 	if cfg.Model == "" {
-		panic("openai: Config.Model must not be empty")
+		return nil, errors.New("openai: Config.Model must not be empty")
 	}
 	if cfg.Endpoint.Provider == "" {
 		cfg.Endpoint.Provider = providerName
 	}
 	cfg.MaxInputTokens = cmp.Or(cfg.MaxInputTokens, cfg.Endpoint.MaxInputTokens, defaultMaxInputTokens)
 	cfg.MaxOutputTokens = cmp.Or(cfg.MaxOutputTokens, cfg.Endpoint.MaxOutputTokens, defaultMaxOutputTokens)
-	return &Client{cfg: cfg}
+	return &Client{cfg: cfg}, nil
 }
 
 // Stream sends a streaming request.

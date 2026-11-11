@@ -37,9 +37,13 @@ weather := tool.New("get_weather", "Get the current weather of a city.",
 		return tool.Text(in.City + ": sunny, 22°C"), nil
 	})
 
+model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+if err != nil {
+	log.Fatal(err)
+}
 a := &agent.Agent{
 	Instruction: "You are a helpful assistant.",
-	Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
+	Model:       model,
 	Tools:       []tool.Tool{weather},
 }
 result, err := a.Run(ctx, agent.Text("What's the weather in Paris?"))

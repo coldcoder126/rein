@@ -37,7 +37,7 @@ func toolsJSON(t *testing.T, client *Client, req chat.Request) []map[string]any 
 func TestDeferredToolsUseToolSearch(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
 
-	tools := toolsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), req)
+	tools := toolsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), req)
 	if len(tools) != 3 || tools[0]["name"] != "quote" || tools[1]["name"] != "report" {
 		t.Fatalf("own tools should keep their order with the search tool appended: %v", tools)
 	}
@@ -48,7 +48,7 @@ func TestDeferredToolsUseToolSearch(t *testing.T) {
 		t.Fatalf("regex search should be the default: %v", tools[2])
 	}
 
-	tools = toolsJSON(t, New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchBM25}), req)
+	tools = toolsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchBM25}), req)
 	if tools[2]["type"] != "tool_search_tool_bm25_20251119" {
 		t.Fatalf("BM25 search was asked for: %v", tools[2])
 	}
@@ -57,10 +57,10 @@ func TestDeferredToolsUseToolSearch(t *testing.T) {
 func TestToolSearchIsSkippedWhenUnavailable(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
 	for name, client := range map[string]*Client{
-		"off":              New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}),
-		"non-claude":       New(Config{Model: "deepseek-v4-pro", Endpoint: Endpoint{BaseURL: "http://example.invalid"}}),
-		"older model":      New(Config{Model: "claude-3-7-sonnet"}),
-		"nothing to defer": New(Config{Model: ModelClaudeSonnet5_5}),
+		"off":              mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}),
+		"non-claude":       mustNew(Config{Model: "deepseek-v4-pro", Endpoint: Endpoint{BaseURL: "http://example.invalid"}}),
+		"older model":      mustNew(Config{Model: "claude-3-7-sonnet"}),
+		"nothing to defer": mustNew(Config{Model: ModelClaudeSonnet5_5}),
 	} {
 		r := req
 		if name == "nothing to defer" {
@@ -99,7 +99,7 @@ func searchHistory() []chat.Message {
 }
 
 func TestServerToolRecordsAreReplayedVerbatim(t *testing.T) {
-	params, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
+	params, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestServerToolRecordsAreReplayedVerbatim(t *testing.T) {
 	}
 
 	// Without tool search the records cannot be resolved and are left out; the tool call itself stays.
-	params, err = New(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
+	params, err = mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
 	if err != nil {
 		t.Fatal(err)
 	}

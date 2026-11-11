@@ -118,7 +118,7 @@ func TestToolsAndCalls(t *testing.T) {
 	addTool(s, strings.Repeat("x", 60), nil)
 	addTool(s, "hidden", nil)
 
-	client := New("my.server", ts.transport(), WithTimeout(3*time.Second),
+	client := mustNew("my.server", ts.transport(), WithTimeout(3*time.Second),
 		WithFilter(func(name string) bool { return name != "hidden" }))
 	defer client.Close()
 
@@ -170,7 +170,7 @@ func TestToolListCache(t *testing.T) {
 	ts := newTestServer(t, nil)
 	ts.ttlMs.Store(60_000)
 	addTool(ts.server, "a", nil)
-	client := New("srv", ts.transport())
+	client := mustNew("srv", ts.transport())
 	defer client.Close()
 
 	run := func() string {
@@ -207,7 +207,7 @@ func TestUnavailableAndReconnect(t *testing.T) {
 	ts := newTestServer(t, nil)
 	addTool(ts.server, "a", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) { return text("ok"), nil })
 	ts.down.Store(true)
-	client := New("srv", ts.transport())
+	client := mustNew("srv", ts.transport())
 	defer client.Close()
 
 	tools, err := client.Tools(context.Background(), tool.RunInfo{})
@@ -254,7 +254,7 @@ func TestWithDeferLoading(t *testing.T) {
 		if deferred {
 			opts = append(opts, WithDeferLoading())
 		}
-		client := New("srv", ts.transport(), opts...)
+		client := mustNew("srv", ts.transport(), opts...)
 		tools, err := client.Tools(context.Background(), tool.RunInfo{})
 		client.Close()
 		if err != nil {
@@ -263,5 +263,20 @@ func TestWithDeferLoading(t *testing.T) {
 		if len(tools) != 1 || tools[0].Def().Deferred != deferred {
 			t.Fatalf("deferred=%v: wrong tools %+v", deferred, tools)
 		}
+	}
+}
+
+// mustNew creates a client for a test whose server name is known to be valid.
+func mustNew(name string, transport Transport, opts ...Option) *Client {
+	client, err := New(name, transport, opts...)
+	if err != nil {
+		panic(err)
+	}
+	return client
+}
+
+func TestNewRequiresAName(t *testing.T) {
+	if client, err := New(" ", Transport{}); err == nil || client != nil {
+		t.Fatalf("New without a server name should fail: %v", err)
 	}
 }

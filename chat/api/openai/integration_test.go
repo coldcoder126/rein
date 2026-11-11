@@ -31,7 +31,7 @@ func integrationClient(t *testing.T, cfg Config) *Client {
 	if m := os.Getenv("REIN_OPENAI_MODEL"); m != "" {
 		cfg.Model = m
 	}
-	return New(cfg)
+	return mustNew(cfg)
 }
 
 func TestIntegrationStreamText(t *testing.T) {

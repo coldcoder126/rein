@@ -61,10 +61,10 @@ type Client struct {
 	cfg Config
 }
 
-// New creates a Gemini chat.Client. It panics when cfg.Model is empty.
-func New(cfg Config) *Client {
+// New creates a Gemini chat.Client. It returns an error when cfg.Model is empty.
+func New(cfg Config) (*Client, error) {
 	if cfg.Model == "" {
-		panic("gemini: Config.Model must not be empty")
+		return nil, errors.New("gemini: Config.Model must not be empty")
 	}
 	if cfg.MaxInputTokens == 0 {
 		cfg.MaxInputTokens = defaultMaxInputTokens
@@ -72,7 +72,7 @@ func New(cfg Config) *Client {
 	if cfg.MaxOutputTokens == 0 {
 		cfg.MaxOutputTokens = defaultMaxOutputTokens
 	}
-	return &Client{cfg: cfg}
+	return &Client{cfg: cfg}, nil
 }
 
 // Info returns the model info.

@@ -35,7 +35,7 @@ func serve(t *testing.T, body *string, status int, chunks ...string) *Client {
 		}
 	}))
 	t.Cleanup(server.Close)
-	return New(Config{Model: ModelGemini3_5Flash, APIKey: "test", BaseURL: server.URL})
+	return mustNew(Config{Model: ModelGemini3_5Flash, APIKey: "test", BaseURL: server.URL})
 }
 
 func run(t *testing.T, client *Client, req chat.Request) chat.Event {
@@ -210,7 +210,7 @@ func TestThinkingConfigByModel(t *testing.T) {
 		t.Fatal("an unknown reasoning level should fail")
 	}
 	// 2.x image models do not support thinking: no thinking config by default, and image output is requested.
-	_, config, err := New(Config{Model: "gemini-2.5-flash-image", ImageGeneration: true}).buildRequest(chat.Request{})
+	_, config, err := mustNew(Config{Model: "gemini-2.5-flash-image", ImageGeneration: true}).buildRequest(chat.Request{})
 	if err != nil || config.ThinkingConfig != nil || len(config.ResponseModalities) != 2 {
 		t.Fatalf("wrong image model config: %+v %v", config, err)
 	}
@@ -223,7 +223,7 @@ func TestToolChoiceConfig(t *testing.T) {
 		{Mode: chat.ToolChoiceNone}:     `{"functionCallingConfig":{"mode":"NONE"}}`,
 		chat.ForceTool("lookup"):        `{"functionCallingConfig":{"allowedFunctionNames":["lookup"],"mode":"ANY"}}`,
 	} {
-		_, config, err := New(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
+		_, config, err := mustNew(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +231,7 @@ func TestToolChoiceConfig(t *testing.T) {
 			t.Fatalf("wrong ToolConfig: %s", raw)
 		}
 	}
-	_, config, _ := New(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Tools: tools})
+	_, config, _ := mustNew(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Tools: tools})
 	if config.ToolConfig != nil {
 		t.Fatal("ToolConfig should not be sent without ToolChoice")
 	}

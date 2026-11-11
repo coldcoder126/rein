@@ -330,6 +330,8 @@ The interfaces a user of the framework implements are kept minimal and do not ga
 - A new capability is an optional interface in the same package (`tool.Sequential`, `tool.Timeouter`, `tool.Instructor`, `session.TailLister`). The framework detects it with a type assertion and otherwise takes a default path on the base interface, which is correct but may be slower.
 - Inputs and results are structs, and a new field's zero value means the previous behavior.
 
+Constructors whose input usually comes from configuration (the model clients, `mcp.New`, `runner.New`) return an error. Tool constructors written inline in an Agent definition (`tool.New`, `shell.Tool`, `agent.SubAgentTool`) panic on a programming error instead, such as a parameter type no schema can be generated for.
+
 A type that wraps one of these interfaces (a store with logging, a tool with metrics) hides the optional interfaces of what it wraps unless it forwards them.
 
 ## Experimental x

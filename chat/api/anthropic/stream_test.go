@@ -28,7 +28,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return New(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: ModelClaudeSonnet4_6, MaxRetries: 0})
+	return mustNew(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: ModelClaudeSonnet4_6, MaxRetries: 0})
 }
 
 func serveSSE(body string) http.HandlerFunc {
@@ -209,7 +209,7 @@ func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
 		}))
 		cfg := tc.cfg
 		cfg.APIKey, cfg.Endpoint.BaseURL, cfg.Model = "test", server.URL, tc.model
-		for range New(cfg).Stream(t.Context(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
+		for range mustNew(cfg).Stream(t.Context(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
 		}
 		server.Close()
 		if !slices.Equal(got, tc.want) {

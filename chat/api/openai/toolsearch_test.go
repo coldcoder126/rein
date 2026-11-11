@@ -30,7 +30,7 @@ func paramsBody(t *testing.T, c *Client, req chat.Request) struct {
 
 func TestDeferredToolsUseHostedToolSearch(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
-	tools := paramsBody(t, New(Config{Model: ModelGPT6Luna}), req).Tools
+	tools := paramsBody(t, mustNew(Config{Model: ModelGPT6Luna}), req).Tools
 	if len(tools) != 3 || tools[0]["name"] != "quote" || tools[1]["name"] != "report" || tools[2]["type"] != "tool_search" {
 		t.Fatalf("own tools should keep their order with tool_search appended: %v", tools)
 	}
@@ -39,14 +39,14 @@ func TestDeferredToolsUseHostedToolSearch(t *testing.T) {
 	}
 
 	for name, client := range map[string]*Client{
-		"disabled": New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}),
+		"disabled": mustNew(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}),
 	} {
 		tools := paramsBody(t, client, req).Tools
 		if len(tools) != 2 || tools[1]["defer_loading"] != nil {
 			t.Fatalf("%s: tools should load up front: %v", name, tools)
 		}
 	}
-	if tools := paramsBody(t, New(Config{Model: ModelGPT6Luna}), chat.Request{Tools: searchTools[:1]}).Tools; len(tools) != 1 {
+	if tools := paramsBody(t, mustNew(Config{Model: ModelGPT6Luna}), chat.Request{Tools: searchTools[:1]}).Tools; len(tools) != 1 {
 		t.Fatalf("nothing deferred, no tool_search: %v", tools)
 	}
 }
@@ -69,12 +69,12 @@ func TestToolSearchItemsAreReplayedVerbatim(t *testing.T) {
 		},
 		{Role: chat.RoleTool, ToolCallID: "call_1", ToolName: "report", Content: []chat.ContentBlock{chat.Text("ok")}},
 	}
-	input := paramsBody(t, New(Config{Model: ModelGPT6Luna}), chat.Request{Messages: history, Tools: searchTools}).Input
+	input := paramsBody(t, mustNew(Config{Model: ModelGPT6Luna}), chat.Request{Messages: history, Tools: searchTools}).Input
 	if len(input) != 5 || string(input[1]) != searchCallRaw || string(input[2]) != searchOutputRaw {
 		t.Fatalf("search items should be sent back unchanged in place: %s", input)
 	}
 
-	input = paramsBody(t, New(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}), chat.Request{Messages: history, Tools: searchTools}).Input
+	input = paramsBody(t, mustNew(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoToolSearch: true}}}), chat.Request{Messages: history, Tools: searchTools}).Input
 	for _, item := range input {
 		if strings.Contains(string(item), "tool_search") {
 			t.Fatalf("without tool search the items are left out: %s", input)
@@ -113,7 +113,7 @@ func TestLoadedFunctionCallKeepsItsNamespace(t *testing.T) {
 
 	history := []chat.Message{chat.NewUserTextMessage("hi"), msg,
 		{Role: chat.RoleTool, ToolCallID: "call_9", ToolName: "report", Content: []chat.ContentBlock{chat.Text("ok")}}}
-	input := paramsBody(t, New(Config{Model: ModelGPT6Luna}), chat.Request{Messages: history, Tools: searchTools}).Input
+	input := paramsBody(t, mustNew(Config{Model: ModelGPT6Luna}), chat.Request{Messages: history, Tools: searchTools}).Input
 	var call map[string]any
 	if err := json.Unmarshal(input[1], &call); err != nil {
 		t.Fatal(err)

@@ -18,7 +18,7 @@ func newTestClient(t *testing.T, cfg Config, handler http.HandlerFunc) *Client {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	cfg.APIKey, cfg.Endpoint.BaseURL = "test", server.URL+"/"
-	return New(cfg)
+	return mustNew(cfg)
 }
 
 type sseEvent struct{ typ, data string }

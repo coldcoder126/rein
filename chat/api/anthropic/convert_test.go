@@ -20,7 +20,7 @@ func toolCallBlock(id, name, args string) chat.ContentBlock {
 }
 
 func TestBuildParamsAddsSystemPromptAndTools(t *testing.T) {
-	client := New(Config{Model: ModelClaudeHaiku4_5})
+	client := mustNew(Config{Model: ModelClaudeHaiku4_5})
 	params, err := client.buildParams(chat.Request{
 		SystemPrompt: "系统提示",
 		Messages:     []chat.Message{chat.NewUserTextMessage("你好")},
@@ -42,7 +42,7 @@ func TestBuildParamsAddsSystemPromptAndTools(t *testing.T) {
 }
 
 func TestBuildParamsTemperatureZeroIsSent(t *testing.T) {
-	client := New(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
 	params, err := client.buildParams(chat.Request{
 		Options:  chat.Options{Temperature: chat.Float(0)},
 		Messages: []chat.Message{chat.NewUserTextMessage("你好")},
@@ -128,7 +128,7 @@ func TestConvertAssistantKeepsBlockOrder(t *testing.T) {
 }
 
 func TestBuildParamsNormalizesReplay(t *testing.T) {
-	client := New(Config{Model: ModelClaudeHaiku4_5})
+	client := mustNew(Config{Model: ModelClaudeHaiku4_5})
 	failed := chat.Message{
 		Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelClaudeHaiku4_5,
 		Content: []chat.ContentBlock{chat.Text("半截")}, StopReason: chat.StopReasonError,
@@ -224,7 +224,7 @@ func TestConvertToolResultWithImages(t *testing.T) {
 }
 
 func TestConvertMediaKinds(t *testing.T) {
-	client := New(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.MediaURL("https://example.com/a.webp"),
@@ -271,17 +271,17 @@ func TestConvertMediaKinds(t *testing.T) {
 }
 
 func TestInfoReportsImageSupport(t *testing.T) {
-	info := New(Config{Model: ModelClaudeSonnet5_5}).Info()
+	info := mustNew(Config{Model: ModelClaudeSonnet5_5}).Info()
 	if !info.SupportsMedia || info.ImageLimits.MaxBytes == 0 {
 		t.Fatalf("should support media by default and give image specs: %+v", info)
 	}
-	if New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
+	if mustNew(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
 		t.Fatal("TextOnly should turn media support off")
 	}
 }
 
 func TestBuildParamsReplacesImagesForTextOnlyEndpoint(t *testing.T) {
-	client := New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
+	client := mustNew(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{{
 		Role:    chat.RoleUser,
 		Content: []chat.ContentBlock{chat.Text("看图"), imageBlock("image/png")},
@@ -341,7 +341,7 @@ func TestBuildParamsReasoning(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := paramsJSON(t, New(tc.cfg), chat.Request{Options: tc.opts})
+			got := paramsJSON(t, mustNew(tc.cfg), chat.Request{Options: tc.opts})
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
 					t.Fatalf("missing %s: %s", want, got)
@@ -354,13 +354,13 @@ func TestBuildParamsReasoning(t *testing.T) {
 			}
 		})
 	}
-	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
+	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
 		t.Fatal("an unknown reasoning level should fail")
 	}
 }
 
 func TestBuildParamsCacheBreakpoints(t *testing.T) {
-	client := New(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
 	req := chat.Request{
 		SystemPrompt: "系统提示",
 		Messages: []chat.Message{
@@ -419,7 +419,7 @@ func TestInfoUsesModelSpec(t *testing.T) {
 		{Config{Model: ModelClaudeSonnet5_5, MaxInputTokens: 50_000, MaxOutputTokens: 2_000}, 50_000, 2_000},
 	}
 	for _, tc := range cases {
-		info := New(tc.cfg).Info()
+		info := mustNew(tc.cfg).Info()
 		if info.MaxInputTokens != tc.input || info.MaxOutputTokens != tc.out {
 			t.Fatalf("%q has the wrong spec: %+v", tc.cfg.Model, info)
 		}
@@ -428,15 +428,15 @@ func TestInfoUsesModelSpec(t *testing.T) {
 
 func TestBuildParamsStructuredOutput(t *testing.T) {
 	output := chat.Options{Reasoning: chat.ReasoningLow, Output: &chat.OutputFormat{Schema: json.RawMessage(`{"type":"object"}`)}}
-	got := paramsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Options: output})
+	got := paramsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Options: output})
 	if !strings.Contains(got, `"output_config":{"effort":"low","format":{"schema":{"type":"object"},"type":"json_schema"}}`) {
 		t.Fatalf("should use native output_config.format alongside effort: %s", got)
 	}
-	got = paramsJSON(t, New(Config{Model: "deepseek-flash"}), chat.Request{SystemPrompt: "你是助手", Options: output})
+	got = paramsJSON(t, mustNew(Config{Model: "deepseek-flash"}), chat.Request{SystemPrompt: "你是助手", Options: output})
 	if strings.Contains(got, "json_schema") || !strings.Contains(got, `JSON Schema:\n\n{\"type\":\"object\"}`) {
 		t.Fatalf("compatible endpoints should write the schema into the system prompt: %s", got)
 	}
-	if New(Config{Model: "deepseek-flash"}).Info().StructuredOutput || !New(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
+	if mustNew(Config{Model: "deepseek-flash"}).Info().StructuredOutput || !mustNew(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
 		t.Fatal("model info should reflect native structured output support")
 	}
 }
@@ -447,22 +447,22 @@ func TestBuildParamsToolChoice(t *testing.T) {
 		return chat.Request{Options: chat.Options{ToolChoice: choice, Reasoning: level}, Tools: tools}
 	}
 	required := chat.ToolChoice{Mode: chat.ToolChoiceRequired}
-	if got := paramsJSON(t, New(Config{Model: ModelClaudeHaiku5_5}), req(chat.ForceTool("lookup"), chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"name":"lookup","type":"tool"}`) || !strings.Contains(got, `"type":"adaptive"`) {
+	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeHaiku5_5}), req(chat.ForceTool("lookup"), chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"name":"lookup","type":"tool"}`) || !strings.Contains(got, `"type":"adaptive"`) {
 		t.Fatalf("adaptive thinking models should keep both thinking and the forced tool: %s", got)
 	}
-	if got := paramsJSON(t, New(Config{Model: ModelClaudeHaiku4_5}), req(required, chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"type":"any"}`) || strings.Contains(got, `"thinking"`) {
+	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeHaiku4_5}), req(required, chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"type":"any"}`) || strings.Contains(got, `"thinking"`) {
 		t.Fatalf("budget thinking models should not enable thinking with forced tool calls: %s", got)
 	}
-	if got := paramsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
+	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
 		t.Fatalf("should send none: %s", got)
 	}
 	r := req(required, "")
 	r.Messages = []chat.Message{chat.NewUserTextMessage("hi")}
-	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
+	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
 		t.Fatalf("models that cannot turn thinking off should reject forced tool calls: %v", err)
 	}
 	r.Tools = nil
-	if _, err := New(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err != nil {
+	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err != nil {
 		t.Fatalf("ToolChoice should be ignored without tools: %v", err)
 	}
 }

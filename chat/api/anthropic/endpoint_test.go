@@ -12,7 +12,7 @@ import (
 )
 
 func TestDeepSeekEndpoint(t *testing.T) {
-	info := New(Config{Endpoint: DeepSeek, Model: ModelDeepSeekFlash}).Info()
+	info := mustNew(Config{Endpoint: DeepSeek, Model: ModelDeepSeekFlash}).Info()
 	if info.Model != ModelDeepSeekFlash || info.MaxInputTokens != 256_000 || info.MaxOutputTokens != 384_000 ||
 		info.Provider != "deepseek" || info.API != API {
 		t.Fatalf("wrong preset: %+v", info)
@@ -23,7 +23,7 @@ func TestDeepSeekEndpoint(t *testing.T) {
 	// Config limits take precedence over the endpoint's, and a copy of the preset can be adjusted.
 	endpoint := DeepSeek
 	endpoint.Compat.NoMedia = true
-	info = New(Config{Endpoint: endpoint, Model: ModelDeepSeekV4Pro, MaxInputTokens: 1000}).Info()
+	info = mustNew(Config{Endpoint: endpoint, Model: ModelDeepSeekV4Pro, MaxInputTokens: 1000}).Info()
 	if info.SupportsMedia || info.MaxInputTokens != 1000 || info.MaxOutputTokens != 384_000 {
 		t.Fatalf("Compat and Config limits should be honored: %+v", info)
 	}
@@ -42,7 +42,7 @@ func TestRepliesAndErrorsNameTheEndpointProvider(t *testing.T) {
 
 	endpoint := DeepSeek
 	endpoint.BaseURL = server.URL
-	client := New(Config{Endpoint: endpoint, Model: ModelDeepSeekFlash, APIKey: "test"})
+	client := mustNew(Config{Endpoint: endpoint, Model: ModelDeepSeekFlash, APIKey: "test"})
 	var last chat.Event
 	for event := range client.Stream(context.Background(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
 		last = event

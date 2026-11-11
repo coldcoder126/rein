@@ -20,7 +20,7 @@ func TestFileScope(t *testing.T) {
 		{Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{BaseURL: "https://proxy.example.com"}}, ""},
 		{Config{Model: ModelClaudeSonnet5_5, FileScope: "anthropic/prod"}, "anthropic/prod"},
 	} {
-		if got := New(tc.cfg).Info().FileScope; got != tc.want {
+		if got := mustNew(tc.cfg).Info().FileScope; got != tc.want {
 			t.Fatalf("%+v: FileScope = %q, want %q", tc.cfg, got, tc.want)
 		}
 	}
@@ -28,7 +28,7 @@ func TestFileScope(t *testing.T) {
 
 func TestBuildParamsReferencesFiles(t *testing.T) {
 	ref := chat.FileRef{Scope: "anthropic", ID: "file_1"}
-	got := paramsJSON(t, New(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
+	got := paramsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
 		chat.MediaFile(ref, "image/png"),
 		chat.MediaURL("https://example.com/a.pdf").WithName("a.pdf").WithFile(ref),
 	}}}})
@@ -58,7 +58,7 @@ func TestUploadFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Model: ModelClaudeSonnet5_5, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, FileScope: "test"})
+	client := mustNew(Config{Model: ModelClaudeSonnet5_5, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, FileScope: "test"})
 	block, err := client.UploadFile(context.Background(), "a.pdf", "application/pdf", strings.NewReader("%PDF"), 3600e9)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestUploadFile(t *testing.T) {
 		block.MIMEType != "application/pdf" || block.Name != "a.pdf" {
 		t.Fatalf("wrong block: %+v %+v", block, block.File)
 	}
-	if _, err := New(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{BaseURL: server.URL}}).UploadFile(context.Background(), "a", "text/plain", strings.NewReader(""), 0); err == nil {
+	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{BaseURL: server.URL}}).UploadFile(context.Background(), "a", "text/plain", strings.NewReader(""), 0); err == nil {
 		t.Fatal("an endpoint without a file store should refuse uploads")
 	}
 }

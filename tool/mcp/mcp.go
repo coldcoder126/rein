@@ -109,10 +109,10 @@ type Client struct {
 
 // New creates a Client for the server reached through transport. name identifies the server in tool names and the
 // system prompt; it should be short and unique among the servers of an Agent. New does not connect.
-// An empty name is a programming error and panics.
-func New(name string, transport Transport, opts ...Option) *Client {
+// It returns an error when name is empty.
+func New(name string, transport Transport, opts ...Option) (*Client, error) {
 	if strings.TrimSpace(name) == "" {
-		panic("mcp: server name must not be empty")
+		return nil, errors.New("mcp: server name must not be empty")
 	}
 	c := &Client{name: name, prefix: "mcp__" + sanitize(name) + "__", transport: transport}
 	for _, opt := range opts {
@@ -124,7 +124,7 @@ func New(name string, transport Transport, opts ...Option) *Client {
 		MultiRoundTrip:         &sdk.MultiRoundTripOptions{Disabled: true},
 		ToolListChangedHandler: func(context.Context, *sdk.ToolListChangedRequest) { c.stale.Store(true) },
 	})
-	return c
+	return c, nil
 }
 
 // Tools connects when needed and returns the server's tools. When the server cannot be reached it returns no tools and no error.

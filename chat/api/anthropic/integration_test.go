@@ -27,7 +27,7 @@ func integrationClient(t *testing.T, cfg Config) *Client {
 	}
 	cfg.APIKey = chattest.EnvKey(t, "ANTHROPIC_API_KEY", "claude-api-key")
 	cfg.Timeout = 120 * time.Second
-	return New(cfg)
+	return mustNew(cfg)
 }
 
 // mustDone runs one request, checks the stream contract and requires a normal finish.

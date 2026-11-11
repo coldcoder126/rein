@@ -20,7 +20,7 @@ func TestFileScope(t *testing.T) {
 		{Config{Model: ModelGPT6Luna, Endpoint: Endpoint{BaseURL: "https://api.deepseek.com"}}, ""},
 		{Config{Model: ModelGPT6Luna, FileScope: "openai/prod"}, "openai/prod"},
 	} {
-		if got := New(tc.cfg).Info().FileScope; got != tc.want {
+		if got := mustNew(tc.cfg).Info().FileScope; got != tc.want {
 			t.Fatalf("%+v: FileScope = %q, want %q", tc.cfg, got, tc.want)
 		}
 	}
@@ -28,7 +28,7 @@ func TestFileScope(t *testing.T) {
 
 func TestBuildParamsReferencesFiles(t *testing.T) {
 	ref := chat.FileRef{Scope: "openai", ID: "file-1"}
-	got := marshal(t, mustParams(t, New(Config{Model: ModelGPT6Luna}), chat.Request{Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
+	got := marshal(t, mustParams(t, mustNew(Config{Model: ModelGPT6Luna}), chat.Request{Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
 		chat.MediaFile(ref, "image/png"),
 		chat.MediaURL("https://example.com/a.pdf").WithFile(ref),
 	}}}}))
@@ -52,7 +52,7 @@ func TestUploadFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Model: ModelGPT6Luna, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL + "/"}, FileScope: "test"})
+	client := mustNew(Config{Model: ModelGPT6Luna, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL + "/"}, FileScope: "test"})
 	block, err := client.UploadFile(context.Background(), "a.pdf", "application/pdf", strings.NewReader("%PDF"), 3600e9)
 	if err != nil {
 		t.Fatal(err)

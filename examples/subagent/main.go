@@ -19,9 +19,13 @@ import (
 )
 
 func main() {
+	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+	if err != nil {
+		log.Fatal(err)
+	}
 	a := &agent.Agent{
 		Instruction: "You coordinate research. Delegate independent pieces of work to sub-agents in parallel, then combine their results.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
+		Model:       model,
 		// Sub-agents run as background tasks; the task tool lets the model list and stop them.
 		Tools: []tool.Tool{agent.SubAgentTool(agent.SubAgentConfig{}), task.Tool()},
 	}

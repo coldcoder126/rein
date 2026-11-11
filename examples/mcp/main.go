@@ -26,12 +26,19 @@ func main() {
 	}
 
 	// Stdio takes a function because a new process is started on every (re)connection.
-	server := mcp.New("text", mcp.Stdio(func() *exec.Cmd { return exec.Command(os.Args[0], "serve") }))
+	server, err := mcp.New("text", mcp.Stdio(func() *exec.Cmd { return exec.Command(os.Args[0], "serve") }))
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer server.Close()
 
+	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+	if err != nil {
+		log.Fatal(err)
+	}
 	a := &agent.Agent{
 		Instruction: "You are a helpful assistant.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
+		Model:       model,
 		Toolsets:    []tool.Toolset{server}, // the tool is offered to the model as mcp__text__reverse
 	}
 	result, err := a.Run(context.Background(), agent.Text("Reverse the string 'hello, rein' with the tool."))

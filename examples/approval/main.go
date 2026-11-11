@@ -37,9 +37,13 @@ func main() {
 		},
 	}
 
+	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+	if err != nil {
+		log.Fatal(err)
+	}
 	a := &agent.Agent{
 		Instruction: "You are a helpful assistant with access to a shell.",
-		Model:       anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5}),
+		Model:       model,
 		// shell.Local runs commands on this machine; use an isolated Executor in production.
 		Tools:       []tool.Tool{shell.Tool(shell.Config{Executor: shell.Local{}})},
 		Middlewares: []agent.Middleware{approve},

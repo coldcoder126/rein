@@ -100,15 +100,15 @@ type Client struct {
 	cfg Config
 }
 
-// New creates an Anthropic chat.Client. It panics when cfg.Model is empty.
-func New(cfg Config) *Client {
+// New creates an Anthropic chat.Client. It returns an error when cfg.Model is empty.
+func New(cfg Config) (*Client, error) {
 	if cfg.Model == "" {
-		panic("anthropic: Config.Model must not be empty")
+		return nil, errors.New("anthropic: Config.Model must not be empty")
 	}
 	if cfg.Endpoint.Provider == "" {
 		cfg.Endpoint.Provider = providerName
 	}
-	return &Client{cfg: cfg}
+	return &Client{cfg: cfg}, nil
 }
 
 // Stream sends a streaming request. Tool call arguments are assembled inside the provider before they are emitted.
