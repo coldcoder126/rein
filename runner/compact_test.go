@@ -359,7 +359,7 @@ func TestCompactionContinuesWithRunContextSteeringAndRewrites(t *testing.T) {
 	})
 	submit(t, h, long("问题一"))
 	steer = true
-	result, err := runSync(h, bg, "c", Text(long("问题二")), WithContext(ContextInput{Text: "页面：设置"}))
+	result, err := runSync(h, bg, "c", Text(long("问题二")), WithContext(ContextInput{Text: "页面：设置", Scope: session.ScopeRun}))
 	if err != nil || result.Final.Text() != "最终回答" {
 		t.Fatalf("should compact mid-run and finish: %v %+v", err, result)
 	}

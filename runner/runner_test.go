@@ -130,8 +130,8 @@ func TestRunPersistsMessagesAndContext(t *testing.T) {
 	r, store := newRunner(t, client, func(c *Config) { c.Agent.Instruction = "你是助手" })
 	result, err := runSync(r, bg, "s1", Text("这家公司便宜吗？"),
 		WithContext(
-			ContextInput{Text: "当前股票：AAPL"},
-			ContextInput{Text: "用户确认：长期关注 AAPL", Kind: session.KindNormal, Scope: session.ScopePersistent},
+			ContextInput{Text: "当前股票：AAPL", Scope: session.ScopeRun},
+			ContextInput{Text: "用户确认：长期关注 AAPL", Kind: session.KindNormal},
 		),
 		WithDetails(map[string]string{"page": "valuation"}),
 	)

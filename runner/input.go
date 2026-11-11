@@ -53,8 +53,10 @@ type ContextInput struct {
 	// Source and Kind describe where the context comes from and what it is, by the business layer's own convention, and may be empty; when set they become attributes of <app_context> visible to the model.
 	Source string
 	Kind   string
-	// Scope defaults to session.ScopeRun: it only enters this run and is not written to the session.
-	// session.ScopePersistent writes it to the session, keeping it visible to later runs.
+	// Scope defaults to session.ScopePersistent: the context is written to the session and stays visible to later runs,
+	// so history only grows and earlier runs keep their prompt cache and thinking. session.ScopeRun keeps it to this run,
+	// for large context that should not pile up in history; later runs are rebuilt without it, which rewrites the prompt
+	// cache from that point and drops the thinking of the runs that had it.
 	Scope   session.Scope
 	Details any
 	Visible bool
@@ -69,11 +71,11 @@ func (in ContextInput) message() session.Message {
 		Visible: in.Visible,
 		Source:  in.Source,
 		Kind:    in.Kind,
-		Scope:   session.ScopeRun,
+		Scope:   session.ScopePersistent,
 		Details: in.Details,
 	})
-	if in.Scope == session.ScopePersistent {
-		msg.Scope = session.ScopePersistent
+	if in.Scope == session.ScopeRun {
+		msg.Scope = session.ScopeRun
 	}
 	return msg
 }
