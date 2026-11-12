@@ -12,7 +12,7 @@ rein 是一个用 Go 构建 LLM Agent 的框架，提供 Agent 循环、工具�
 
 ## 特性
 
-- **多家模型**：以 Anthropic 为主，另支持 OpenAI、Gemini、DeepSeek。消息、流式事件、错误分类、结构化输出和多媒体输入（内嵌、URL 或已上传的文件）都走统一的接口。
+- **多家模型**：以 Anthropic 为主，另支持 OpenAI、Gemini 以及兼容这些协议的接口。消息、流式事件、错误分类、结构化输出和多媒体输入（内嵌、URL 或已上传的文件）都走统一的接口。
 - **Agent 循环**：工具并发执行，带超时和结果截断；运行中可以插入引导消息和后续消息；中间件链可以包装运行、轮次、模型调用和工具调用。
 - **工具**：用参数结构体定义带类型的工具，schema 自动生成；工具集可以按会话提供不同的工具；工具可以延迟加载，由模型通过 provider 的工具搜索按需找到（Anthropic、OpenAI），不破坏提示词缓存。
 - **子 Agent 和后台任务**：把工作交给在后台运行的子 Agent；shell 命令也可以在后台运行。
@@ -74,8 +74,8 @@ fmt.Println(result.Final.TextContent())
 
 | 包 | 说明 |
 |---|---|
-| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API 及兼容的接口（内置 DeepSeek 预设） |
-| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API 及兼容的接口（内置 DeepSeek 预设） |
+| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API 及兼容的接口 |
+| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API 及兼容的接口 |
 | [`chat/api/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/gemini) | Google Gemini |
 | [`chat/imageproc`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/imageproc) | 图片进入历史前的规整（格式、尺寸） |
 | [`tool/skill`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/skill) | 技能：按需加载的说明和资源文件 |
@@ -84,6 +84,17 @@ fmt.Println(result.Final.TextContent())
 | [`tool/task`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/task) | 查看和停止后台任务 |
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | 通过 stdio 或 Streamable HTTP 使用 MCP 服务器的工具 |
 | `x/...` | 实验性的包，不做稳定性承诺 |
+
+## 兼容接口
+
+其他厂商若使用 Anthropic 或 OpenAI 协议，通过 `Config.Endpoint` 配置：地址、厂商名、模型上限，以及在 `Compat` 中列出它比协议原厂缺少的特性。rein 不内置厂商预设。以 DeepSeek 为例（实测值，以厂商当前文档为准）：
+
+| 协议 | `BaseURL` | 上限（输入 / 输出） | `Compat` |
+|---|---|---|---|
+| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` |
+| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`、`NoStructuredOutput`、`NoToolSearch` |
+
+两者都设 `Provider: "deepseek"`。模型不收图片时再加 `NoMedia`。
 
 ## 示例
 

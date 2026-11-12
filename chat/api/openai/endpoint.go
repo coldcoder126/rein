@@ -27,20 +27,3 @@ type Compat struct {
 	// (chat.ToolDef.Deferred) are sent up front.
 	NoToolSearch bool
 }
-
-// DeepSeek models, served by the DeepSeek endpoint.
-const (
-	ModelDeepSeekFlash = "deepseek-flash"
-	ModelDeepSeekV4Pro = "deepseek-v4-pro"
-)
-
-// DeepSeek is DeepSeek's Responses endpoint. It is stateless and does not recognize store / include; reasoning comes
-// back as plain reasoning items that are sent back whole. Media is passed through: set Compat.NoMedia on a copy
-// when the model should not receive it.
-var DeepSeek = Endpoint{
-	Provider:        "deepseek",
-	BaseURL:         "https://api.deepseek.com",
-	MaxInputTokens:  1_000_000,
-	MaxOutputTokens: 384_000,
-	Compat:          Compat{NoStoreParams: true, NoStructuredOutput: true, NoToolSearch: true},
-}

@@ -12,7 +12,7 @@ rein is a Go framework for building LLM agents: the agent loop, tools, sessions 
 
 ## Features
 
-- **Model providers**: Anthropic first, plus OpenAI, Gemini and DeepSeek behind one interface: messages, streaming events, classified errors, structured output, and media input inline, by URL or as uploaded files.
+- **Model providers**: Anthropic first, plus OpenAI, Gemini and any endpoint compatible with their APIs behind one interface: messages, streaming events, classified errors, structured output, and media input inline, by URL or as uploaded files.
 - **Agent loop**: parallel tool execution with timeouts and result truncation, steering and follow-up messages during a run, and a middleware chain wrapping runs, turns, model calls and tool calls.
 - **Tools**: typed tools from a parameter struct, with the schema generated for you; toolsets that provide tools per session; deferred tools found through the provider's tool search (Anthropic, OpenAI) without breaking the prompt cache.
 - **Sub-agents and background tasks**: delegate work to sub-agents running in the background; run shell commands in the background too.
@@ -74,8 +74,8 @@ Define tools → put them in an `agent.Agent` → hand the Agent and a store to 
 
 | Package | Description |
 |---|---|
-| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API and compatible endpoints (DeepSeek preset) |
-| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API and compatible endpoints (DeepSeek preset) |
+| [`chat/api/anthropic`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/anthropic) | Anthropic Messages API and compatible endpoints |
+| [`chat/api/openai`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/openai) | OpenAI Responses API and compatible endpoints |
 | [`chat/api/gemini`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/api/gemini) | Google Gemini |
 | [`chat/imageproc`](https://pkg.go.dev/github.com/coldcoder126/rein/chat/imageproc) | Normalizing images (format, size) before they enter history |
 | [`tool/skill`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/skill) | Skills: instructions and resources loaded on demand |
@@ -84,6 +84,17 @@ Define tools → put them in an `agent.Agent` → hand the Agent and a store to 
 | [`tool/task`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/task) | Listing and stopping background tasks |
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | Tools of MCP servers, over stdio or Streamable HTTP |
 | `x/...` | Experimental packages, not covered by any stability promise |
+
+## Compatible endpoints
+
+Another vendor speaking the Anthropic or OpenAI protocol is configured with `Config.Endpoint`: its address, the vendor name, its models' limits, and in `Compat` what it lacks compared with the protocol's own service. rein ships no vendor presets. For DeepSeek, for example (as tested; check the vendor's current docs):
+
+| Protocol | `BaseURL` | Limits (input / output) | `Compat` |
+|---|---|---|---|
+| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` |
+| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`, `NoStructuredOutput`, `NoToolSearch` |
+
+Set `Provider: "deepseek"` on either. Add `NoMedia` for models that take no images.
 
 ## Examples
 

@@ -37,8 +37,8 @@ type APIKeyProvider func(ctx context.Context) (string, error)
 
 // Config configures the Anthropic Client.
 type Config struct {
-	// Endpoint is the service the client talks to: the zero value is Anthropic's own, DeepSeek is a preset,
-	// and any other compatible endpoint is described by filling one in.
+	// Endpoint is the service the client talks to: the zero value is Anthropic's own, and a compatible
+	// endpoint is described by filling one in.
 	Endpoint       Endpoint
 	APIKey         string
 	APIKeyProvider APIKeyProvider

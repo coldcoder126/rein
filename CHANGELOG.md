@@ -2,6 +2,12 @@
 
 Breaking changes and notable additions per release. Before v1 any release may break the API.
 
+## Unreleased
+
+### Breaking
+
+- **No vendor presets.** `anthropic.DeepSeek`, `openai.DeepSeek` and the `ModelDeepSeek*` constants are removed. Fill in an `Endpoint` yourself; the README lists the values for DeepSeek.
+
 ## v0.2.3 (2026-11-11)
 
 ### Breaking

@@ -29,20 +29,3 @@ type Compat struct {
 	// Config.PrefixMismatch is not sent and the endpoint's own default applies.
 	NoThinkingBinding bool
 }
-
-// DeepSeek models, served by the DeepSeek endpoint.
-const (
-	ModelDeepSeekFlash = "deepseek-flash"
-	ModelDeepSeekV4Pro = "deepseek-v4-pro"
-)
-
-// DeepSeek is DeepSeek's Anthropic-compatible endpoint. It documents no max_tokens limit (it depends on model and
-// thinking), so the model's output limit is used. Media is passed through: DeepSeek reads images only, and not on
-// every model, so set Compat.NoMedia on a copy when the model should not receive it.
-var DeepSeek = Endpoint{
-	Provider:        "deepseek",
-	BaseURL:         "https://api.deepseek.com/anthropic",
-	MaxInputTokens:  256_000,
-	MaxOutputTokens: 384_000,
-	Compat:          Compat{NoThinkingSignature: true},
-}
