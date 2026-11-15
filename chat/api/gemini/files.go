@@ -32,16 +32,16 @@ func (c *Client) UploadFile(ctx context.Context, name, mimeType string, r io.Rea
 	}
 	file, err := client.Files.Upload(ctx, r, &genai.UploadFileConfig{MIMEType: mimeType, DisplayName: name})
 	if err != nil {
-		return chat.ContentBlock{}, wrapError(ctx, err)
+		return chat.ContentBlock{}, c.wrapError(ctx, err)
 	}
 	for file.State == genai.FileStateProcessing {
 		select {
 		case <-ctx.Done():
-			return chat.ContentBlock{}, wrapError(ctx, ctx.Err())
+			return chat.ContentBlock{}, c.wrapError(ctx, ctx.Err())
 		case <-time.After(fileStatePoll):
 		}
 		if file, err = client.Files.Get(ctx, file.Name, nil); err != nil {
-			return chat.ContentBlock{}, wrapError(ctx, err)
+			return chat.ContentBlock{}, c.wrapError(ctx, err)
 		}
 	}
 	if file.State == genai.FileStateFailed {
@@ -49,7 +49,7 @@ func (c *Client) UploadFile(ctx context.Context, name, mimeType string, r io.Rea
 		if file.Error != nil && file.Error.Message != "" {
 			msg = file.Error.Message
 		}
-		return chat.ContentBlock{}, wrapError(ctx, fmt.Errorf("gemini: file %s: %s", file.Name, msg))
+		return chat.ContentBlock{}, c.wrapError(ctx, fmt.Errorf("gemini: file %s: %s", file.Name, msg))
 	}
 	return chat.MediaFile(chat.FileRef{Scope: scope, ID: file.URI, ExpiresAt: file.ExpirationTime}, mimeType).WithName(name), nil
 }
@@ -65,7 +65,7 @@ func (c *Client) DeleteFile(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := client.Files.Delete(ctx, name, nil); err != nil {
-		return wrapError(ctx, err)
+		return c.wrapError(ctx, err)
 	}
 	return nil
 }
@@ -75,7 +75,7 @@ func (c *Client) fileScope() string {
 	switch {
 	case c.cfg.FileScope != "":
 		return c.cfg.FileScope
-	case !c.cfg.Vertex && c.cfg.BaseURL == "":
+	case !c.cfg.Endpoint.Vertex && c.cfg.Endpoint.BaseURL == "":
 		return providerName
 	}
 	return ""

@@ -21,47 +21,25 @@ const (
 	API = "gemini"
 )
 
-// Model is the model a Client talks to. Beyond the zero value only Name must be set: a model is taken to support
-// the whole protocol, and one that does not says what it lacks in Compat.
-type Model struct {
-	// Name is the model name sent to the API.
-	Name string
-	// MaxInputTokens is the context limit of the model; 0 declares none, and the runner then never compacts history.
-	MaxInputTokens int
-	// MaxOutputTokens is the output limit of the model; 0 declares none. It is only reported by Info: a request
-	// that sets no MaxTokens sends no limit.
-	MaxOutputTokens int
-	// Compat says where this model differs from the full protocol; see Compat.
-	Compat Compat
-}
-
-// Compat lists what a model lacks compared with the full Gemini API, as its current models speak it. The zero value
-// lacks nothing.
-type Compat struct {
-	// NoThinkingLevel means the model only accepts a thinking budget, not thinkingLevel (Gemini 2.x).
-	NoThinkingLevel bool
-	// NoMediaInToolResults means the model does not accept media embedded in function results (Gemini 2.x);
-	// the media is sent as separate parts of the same message instead.
-	NoMediaInToolResults bool
-}
-
 // APIKeyProvider resolves the API key dynamically, for short-lived tokens.
 type APIKeyProvider func(ctx context.Context) (string, error)
 
 // Config configures the Gemini Client.
 type Config struct {
+	// Endpoint is the service the client talks to: the zero value is Google's Gemini API, and Vertex AI or a
+	// compatible endpoint is described by filling one in.
+	Endpoint Endpoint
+	// Model is the model the client talks to; its Name must be set. Another model is another Client.
+	Model          Model
 	APIKey         string
 	APIKeyProvider APIKeyProvider
-	// Vertex means the API key belongs to Vertex AI (express mode) and requests go to the Vertex endpoint;
-	// by default the Gemini API (generativelanguage.googleapis.com) is used.
-	// Full Vertex access based on project, region and credentials is not provided yet.
-	Vertex  bool
-	BaseURL string
-	// Model is the model the client talks to; its Name must be set. Another model is another Client.
-	Model      Model
-	Timeout    time.Duration
+	Timeout        time.Duration
+	// MaxRetries is how many times a failed request is retried (408, 429 and 5xx); 0 leaves the SDK's default,
+	// which is not to retry.
+	MaxRetries int
 	Headers    map[string]string
 	HTTPClient *http.Client
+
 	// ImageGeneration means the model can generate images (such as the gemini-*-image models):
 	// requests ask for both TEXT and IMAGE output, and generated images in history are replayed as is.
 	ImageGeneration bool
@@ -74,8 +52,10 @@ type Config struct {
 
 // Client wraps the genai SDK.
 type Client struct {
-	cfg  Config
-	info chat.ModelInfo
+	cfg Config
+	// compat is what the endpoint or the model lacks.
+	compat Compat
+	info   chat.ModelInfo
 }
 
 // New creates a Gemini chat.Client. It returns an error when cfg.Model.Name is empty.
@@ -83,9 +63,12 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Model.Name == "" {
 		return nil, errors.New("gemini: Config.Model.Name must not be empty")
 	}
-	c := &Client{cfg: cfg}
+	if cfg.Endpoint.Provider == "" {
+		cfg.Endpoint.Provider = providerName
+	}
+	c := &Client{cfg: cfg, compat: cfg.Endpoint.Compat.merge(cfg.Model.Compat)}
 	c.info = chat.ModelInfo{
-		Provider:         providerName,
+		Provider:         cfg.Endpoint.Provider,
 		API:              API,
 		Model:            cfg.Model.Name,
 		MaxInputTokens:   cfg.Model.MaxInputTokens,
@@ -109,7 +92,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 
 		client, err := c.newSDKClient(ctx)
 		if err != nil {
-			b.Fail(wrapError(ctx, err))
+			b.Fail(c.wrapError(ctx, err))
 			return
 		}
 		contents, config, err := c.buildRequest(req)
@@ -125,7 +108,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		s := &streamState{b: b, last: -1}
 		for resp, err := range client.Models.GenerateContentStream(ctx, c.cfg.Model.Name, contents, config) {
 			if err != nil {
-				b.Fail(wrapError(ctx, fmt.Errorf("gemini stream: %w", err)))
+				b.Fail(c.wrapError(ctx, fmt.Errorf("gemini stream: %w", err)))
 				return
 			}
 			if !s.handle(resp) {
@@ -150,14 +133,18 @@ func (c *Client) newSDKClient(ctx context.Context) (*genai.Client, error) {
 		Backend:    genai.BackendGeminiAPI,
 		HTTPClient: c.cfg.HTTPHooks.HTTPClient(c.cfg.HTTPClient),
 		HTTPOptions: genai.HTTPOptions{
-			BaseURL: c.cfg.BaseURL,
+			BaseURL: c.cfg.Endpoint.BaseURL,
 		},
 	}
-	if c.cfg.Vertex {
+	if c.cfg.Endpoint.Vertex {
 		cc.Backend = genai.BackendVertexAI
 	}
 	if c.cfg.Timeout > 0 {
 		cc.HTTPOptions.Timeout = &c.cfg.Timeout
+	}
+	if c.cfg.MaxRetries > 0 {
+		attempts := int32(c.cfg.MaxRetries + 1)
+		cc.HTTPOptions.RetryOptions = &genai.HTTPRetryOptions{Attempts: &attempts}
 	}
 	if len(c.cfg.Headers) > 0 {
 		cc.HTTPOptions.Headers = make(http.Header, len(c.cfg.Headers))
@@ -168,7 +155,7 @@ func (c *Client) newSDKClient(ctx context.Context) (*genai.Client, error) {
 	return genai.NewClient(ctx, cc)
 }
 
-func wrapError(ctx context.Context, err error) *chat.Error {
+func (c *Client) wrapError(ctx context.Context, err error) *chat.Error {
 	var status int
 	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
@@ -176,7 +163,7 @@ func wrapError(ctx context.Context, err error) *chat.Error {
 	}
 	ce := chat.WrapError(ctx, err, status, 0)
 	if ce.Message == "" {
-		ce.Message = providerName
+		ce.Message = c.cfg.Endpoint.Provider
 	}
 	return ce
 }

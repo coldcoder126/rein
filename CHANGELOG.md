@@ -8,6 +8,7 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 - `chat.ReasoningMax`, the highest effort: `max` on the Anthropic protocol (models without it set `Compat.NoMaxEffort`), `xhigh` on OpenAI's.
 - `anthropic.Endpoint.Auth`: `AuthBearer` sends the key as `Authorization: Bearer` for endpoints that take it that way.
+- `gemini.Config.MaxRetries`, as on the other protocols; 0 keeps the SDK's default of not retrying.
 
 ### Breaking
 
@@ -20,6 +21,7 @@ Breaking changes and notable additions per release. Before v1 any release may br
   | `anthropic.ModelClaude*`, `openai.ModelGPT6Luna`, `gemini.ModelGemini*` | removed; write the name |
   | openai `Config{Reasoning: true}` | the default; models that do not reason set `Compat.NoReasoning` |
   | gemini 2.x detected by name | `Compat{NoThinkingLevel: true, NoMediaInToolResults: true}` |
+  | gemini `Config{BaseURL: u, Vertex: true}` | `Config{Endpoint: gemini.Endpoint{BaseURL: u, Vertex: true}}`, like the other protocols |
 
   What the Anthropic client used to infer from the model name is now declared. Models that were configured by name need these to behave as before:
 

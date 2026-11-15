@@ -31,7 +31,7 @@ func integrationClient(t *testing.T, cfg Config) *Client {
 		cfg.APIKey = key
 	} else {
 		cfg.APIKey = chattest.EnvKey(t, "GEMINI_VERTEX_API_KEY", "gemini-vertex-api-key")
-		cfg.Vertex = true
+		cfg.Endpoint.Vertex = true
 	}
 	cfg.Timeout = 120 * time.Second
 	return mustNew(cfg)

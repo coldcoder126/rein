@@ -35,7 +35,7 @@ func serve(t *testing.T, body *string, status int, chunks ...string) *Client {
 		}
 	}))
 	t.Cleanup(server.Close)
-	return mustNew(Config{Model: flash35, APIKey: "test", BaseURL: server.URL})
+	return mustNew(Config{Model: flash35, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}})
 }
 
 func run(t *testing.T, client *Client, req chat.Request) chat.Event {

@@ -55,7 +55,7 @@ func thinkingConfig(budgetOnly bool, level chat.ReasoningLevel) (*genai.Thinking
 }
 
 func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.GenerateContentConfig, error) {
-	compat := c.cfg.Model.Compat
+	compat := c.compat
 	config := &genai.GenerateContentConfig{}
 	if strings.TrimSpace(req.SystemPrompt) != "" {
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: req.SystemPrompt}}}

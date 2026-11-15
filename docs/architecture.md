@@ -90,7 +90,7 @@ rein has no table of models and ships no vendor presets: limits and gaps are the
 
 - `anthropic`: the Anthropic Messages API, also for endpoints compatible with it.
 - `openai`: the OpenAI Responses API, also for endpoints compatible with it; there is no Chat Completions implementation.
-- `gemini`: built on the official `google.golang.org/genai` SDK; it uses the Gemini API by default, and the `Vertex` switch supports Vertex API keys. Full Vertex access with projects and credentials is not provided yet.
+- `gemini`: built on the official `google.golang.org/genai` SDK; it uses the Gemini API by default, and `Endpoint.Vertex` supports Vertex API keys. Full Vertex access with projects and credentials is not provided yet.
 
 Responses is used statelessly (`store:false`), so replay relies on block signatures: thinking blocks keep the full reasoning item (with encrypted content, unless the model sets `Compat.NoReasoning`), text blocks keep the message id and phase, and tool call blocks keep the item id of the function_call. These signatures are only valid for the original model and are cleared across models by `NormalizeForModel`. DeepSeek's chain of thought comes as plain reasoning items that are also sent back whole; it does not recognize `store` / `include`, which `Compat.NoStoreParams` leaves out.
 

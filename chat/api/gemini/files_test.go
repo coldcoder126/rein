@@ -14,8 +14,8 @@ func TestFileScope(t *testing.T) {
 		want string
 	}{
 		{Config{Model: flash35}, "gemini"},
-		{Config{Model: flash35, Vertex: true}, ""},
-		{Config{Model: flash35, BaseURL: "https://proxy.example.com"}, ""},
+		{Config{Model: flash35, Endpoint: Endpoint{Vertex: true}}, ""},
+		{Config{Model: flash35, Endpoint: Endpoint{BaseURL: "https://proxy.example.com"}}, ""},
 		{Config{Model: flash35, FileScope: "gemini/prod"}, "gemini/prod"},
 	} {
 		if got := mustNew(tc.cfg).Info().FileScope; got != tc.want {
@@ -38,7 +38,7 @@ func TestBuildRequestReferencesFiles(t *testing.T) {
 
 func TestUploadFileChecksArguments(t *testing.T) {
 	ctx := context.Background()
-	if _, err := mustNew(Config{Model: flash35, Vertex: true}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 0); err == nil {
+	if _, err := mustNew(Config{Model: flash35, Endpoint: Endpoint{Vertex: true}}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 0); err == nil {
 		t.Fatal("Vertex has no Files API")
 	}
 	if _, err := mustNew(Config{Model: flash35}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 3600e9); err == nil {
