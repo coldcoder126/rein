@@ -24,7 +24,7 @@ func main() {
 			return tool.Text(in.City + ": sunny, 22°C"), nil
 		})
 
-	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.Model{Name: "claude-sonnet-5-5"}})
 	if err != nil {
 		log.Fatal(err)
 	}

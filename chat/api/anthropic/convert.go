@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,9 +13,7 @@ import (
 )
 
 func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, error) {
-	target := c.modelInfo(req)
-	spec := c.spec(target.Model)
-	if !spec.structuredOutput {
+	if c.compat.NoStructuredOutput {
 		req = chat.WithOutputInstructions(req)
 	}
 
@@ -28,21 +27,19 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 		systemBlocks = append(systemBlocks, block)
 	}
 
-	search := c.toolSearchVariant(spec, req.Tools)
-	messages := chat.NormalizeForModel(req.Messages, target, chat.WithToolCallIDNormalizer(normalizeToolCallID))
-	msgs, err := convertMessages(messages, c.cfg.Endpoint.Compat.NoThinkingSignature, search != "")
+	search := c.toolSearchVariant(req.Tools)
+	messages := chat.NormalizeForModel(req.Messages, c.info, chat.WithToolCallIDNormalizer(normalizeToolCallID))
+	msgs, err := convertMessages(messages, c.compat.NoThinkingSignature, search != "")
 	if err != nil {
 		return goanthropic.MessageNewParams{}, err
 	}
 	markLastBlock(msgs, cc)
 
-	maxTokens := int64(spec.maxOutput)
-	if req.MaxTokens > 0 {
-		maxTokens = int64(req.MaxTokens)
-	}
+	maxOutput := c.cfg.Model.MaxOutputTokens
+	maxTokens := int64(cmp.Or(req.MaxTokens, maxOutput, DefaultMaxTokens))
 
 	params := goanthropic.MessageNewParams{
-		Model:     c.resolveModel(req),
+		Model:     goanthropic.Model(c.cfg.Model.Name),
 		MaxTokens: maxTokens,
 		Messages:  msgs,
 		System:    systemBlocks,
@@ -58,20 +55,20 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 	if forced := len(req.Tools) > 0 && (req.ToolChoice.Mode == chat.ToolChoiceRequired || req.ToolChoice.Mode == chat.ToolChoiceTool); forced {
 		// Whether forced tool calls work with thinking depends on the model (tested): models that cannot turn thinking off do not support it;
 		// budget thinking models cannot enable both, so thinking is off for this request; adaptive thinking models allow both.
-		if spec.alwaysThinks {
-			return goanthropic.MessageNewParams{}, fmt.Errorf("anthropic: model %s does not support forced tool calls (ToolChoice %s)", target.Model, req.ToolChoice.Mode)
+		if c.compat.NoDisableThinking {
+			return goanthropic.MessageNewParams{}, fmt.Errorf("anthropic: model %s does not support forced tool calls (ToolChoice %s)", c.cfg.Model.Name, req.ToolChoice.Mode)
 		}
-		if spec.budgetThinking && reasoning != chat.ReasoningOff {
+		if c.compat.NoAdaptiveThinking && reasoning != chat.ReasoningOff {
 			reasoning = ""
 		}
 	}
-	thinking, err := applyReasoning(&params, reasoning, spec, req.MaxTokens > 0)
+	thinking, err := applyReasoning(&params, reasoning, c.compat, maxOutput, req.MaxTokens > 0)
 	if err != nil {
 		return goanthropic.MessageNewParams{}, err
 	}
 	// An explicit temperature is kept when thinking was left unset, so it is not stated there.
 	if thinking || req.Temperature == nil {
-		thinking = c.bindThinking(&params, spec) || thinking
+		thinking = c.bindThinking(&params) || thinking
 	}
 	// The API does not accept a custom temperature with thinking on.
 	if req.Temperature != nil && !thinking {
@@ -100,15 +97,15 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 	return params, nil
 }
 
-// bindThinking sets thinking.block_binding on models that think by default, so a replayed thinking block whose conversation
-// changed is handled as Config.PrefixMismatch says, and reports whether it did. Thinking left unset is sent as adaptive, which
-// is what those models do anyway, to give the setting a place; disabled thinking cannot carry it.
-func (c *Client) bindThinking(params *goanthropic.MessageNewParams, spec modelSpec) bool {
+// bindThinking sets thinking.block_binding, so a replayed thinking block whose conversation changed is handled as
+// Config.PrefixMismatch says, and reports whether it did. Thinking left unset is sent as adaptive, which is what the
+// models do anyway, to give the setting a place; disabled thinking cannot carry it, and budget thinking models do not know it.
+func (c *Client) bindThinking(params *goanthropic.MessageNewParams) bool {
 	behavior := c.cfg.PrefixMismatch
 	if behavior == "" {
 		behavior = PrefixMismatchDrop
 	}
-	if c.cfg.Endpoint.Compat.NoThinkingBinding || !spec.thinksByDefault || spec.budgetThinking {
+	if c.compat.NoThinkingBinding || c.compat.NoAdaptiveThinking {
 		return false
 	}
 	t := &params.Thinking

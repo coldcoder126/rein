@@ -24,6 +24,7 @@ var thinkingBudgets = map[chat.ReasoningLevel]int32{
 	chat.ReasoningMedium: 8_192,
 	chat.ReasoningHigh:   16_384,
 	chat.ReasoningXHigh:  24_576,
+	chat.ReasoningMax:    32_768,
 }
 
 var thinkingLevels = map[chat.ReasoningLevel]genai.ThinkingLevel{
@@ -31,15 +32,12 @@ var thinkingLevels = map[chat.ReasoningLevel]genai.ThinkingLevel{
 	chat.ReasoningMedium: genai.ThinkingLevelMedium,
 	chat.ReasoningHigh:   genai.ThinkingLevelHigh,
 	chat.ReasoningXHigh:  genai.ThinkingLevelHigh,
-}
-
-// usesThinkingBudget means the model only accepts a thinking budget (Gemini 2.x); 3.x and later use thinkingLevel.
-func usesThinkingBudget(model string) bool {
-	return strings.HasPrefix(model, "gemini-2")
+	chat.ReasoningMax:    genai.ThinkingLevelHigh,
 }
 
 // thinkingConfig maps the provider-neutral effort to Gemini's thinking config, always asking for thought summaries.
-func thinkingConfig(model string, level chat.ReasoningLevel) (*genai.ThinkingConfig, error) {
+// budgetOnly means the model only accepts a thinking budget, see Compat.NoThinkingLevel.
+func thinkingConfig(budgetOnly bool, level chat.ReasoningLevel) (*genai.ThinkingConfig, error) {
 	switch level {
 	case "":
 		return &genai.ThinkingConfig{IncludeThoughts: true}, nil
@@ -50,14 +48,14 @@ func thinkingConfig(model string, level chat.ReasoningLevel) (*genai.ThinkingCon
 	if _, ok := thinkingLevels[level]; !ok {
 		return nil, fmt.Errorf("gemini: unknown reasoning level %q", level)
 	}
-	if usesThinkingBudget(model) {
+	if budgetOnly {
 		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr(thinkingBudgets[level])}, nil
 	}
 	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: thinkingLevels[level]}, nil
 }
 
 func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.GenerateContentConfig, error) {
-	model := c.resolveModel(req)
+	compat := c.cfg.Model.Compat
 	config := &genai.GenerateContentConfig{}
 	if strings.TrimSpace(req.SystemPrompt) != "" {
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: req.SystemPrompt}}}
@@ -77,8 +75,8 @@ func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.Genera
 		config.ResponseJsonSchema = schema
 	}
 	// Gemini 2.x image models do not support thinking and reject a thinking config.
-	if !(c.cfg.ImageGeneration && usesThinkingBudget(model) && req.Reasoning == "") {
-		thinking, err := thinkingConfig(model, req.Reasoning)
+	if !(c.cfg.ImageGeneration && compat.NoThinkingLevel && req.Reasoning == "") {
+		thinking, err := thinkingConfig(compat.NoThinkingLevel, req.Reasoning)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -114,7 +112,7 @@ func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.Genera
 		}
 	}
 
-	contents, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)), !usesThinkingBudget(model))
+	contents, err := convertMessages(chat.NormalizeForModel(req.Messages, c.info), !compat.NoMediaInToolResults)
 	if err != nil {
 		return nil, nil, err
 	}

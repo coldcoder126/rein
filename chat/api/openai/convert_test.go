@@ -25,7 +25,7 @@ func toolCallBlock(id, name, args, sig string) chat.ContentBlock {
 }
 
 func TestBuildParamsBasics(t *testing.T) {
-	client := mustNew(Config{Model: ModelGPT6Luna})
+	client := mustNew(Config{Model: plain})
 	params, err := client.buildParams(chat.Request{
 		SystemPrompt: "系统提示",
 		Options:      chat.Options{Temperature: chat.Float(0), MaxTokens: 4},
@@ -58,19 +58,19 @@ func TestBuildParamsBasics(t *testing.T) {
 func TestBuildParamsReasoningImageGenerationAndDisabledStoreParams(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("你好")}}
 
-	got := marshal(t, mustParams(t, mustNew(Config{Model: ModelGPT6Luna, Reasoning: true, ImageGeneration: true}), req))
+	got := marshal(t, mustParams(t, mustNew(Config{Model: luna, ImageGeneration: true}), req))
 	for _, want := range []string{`"include":["reasoning.encrypted_content"]`, `"reasoning":{"summary":"auto"}`, `"type":"image_generation"`, `"store":false`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %s: %s", want, got)
 		}
 	}
 
-	got = marshal(t, mustParams(t, mustNew(Config{Model: ModelGPT6Luna, Reasoning: true, Endpoint: Endpoint{Compat: Compat{NoStoreParams: true}}}), req))
+	got = marshal(t, mustParams(t, mustNew(Config{Model: luna, Endpoint: Endpoint{Compat: Compat{NoStoreParams: true}}}), req))
 	if strings.Contains(got, `"store"`) || strings.Contains(got, `"include"`) {
 		t.Fatalf("DisableStoreParams should not send store/include: %s", got)
 	}
 
-	info := mustNew(Config{Model: ModelGPT6Luna, ImageGeneration: true}).Info()
+	info := mustNew(Config{Model: plain, ImageGeneration: true}).Info()
 	if !info.ImageOutput || !info.SupportsMedia {
 		t.Fatalf("Info should reflect image capabilities: %+v", info)
 	}
@@ -87,7 +87,7 @@ func mustParams(t *testing.T, c *Client, req chat.Request) any {
 
 func TestReplayAssistantKeepsBlockOrderAndSignatures(t *testing.T) {
 	const reasoningItem = `{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"先想"}],"encrypted_content":"ENC"}`
-	client := mustNew(Config{Model: "m1", ImageGeneration: true})
+	client := mustNew(Config{Model: Model{Name: "m1", Compat: Compat{NoReasoning: true}}, ImageGeneration: true})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("查"),
 		{
@@ -126,7 +126,7 @@ func TestReplayAssistantKeepsBlockOrderAndSignatures(t *testing.T) {
 }
 
 func TestReplayCrossModelDropsPrivateSignatures(t *testing.T) {
-	client := mustNew(Config{Model: "m1", ImageGeneration: true})
+	client := mustNew(Config{Model: Model{Name: "m1", Compat: Compat{NoReasoning: true}}, ImageGeneration: true})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("查"),
 		{
@@ -154,7 +154,7 @@ func TestReplayCrossModelDropsPrivateSignatures(t *testing.T) {
 }
 
 func TestToolOutputWithImagesUsesContentArray(t *testing.T) {
-	client := mustNew(Config{Model: ModelGPT6Luna})
+	client := mustNew(Config{Model: plain})
 	image := chat.ContentBlock{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")}
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("看"),
@@ -177,7 +177,7 @@ func TestToolOutputWithImagesUsesContentArray(t *testing.T) {
 }
 
 func TestReplayDropsFailedMessagesAndReplacesUnsupportedImages(t *testing.T) {
-	client := mustNew(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
+	client := mustNew(Config{Model: plain, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("x")}}},
 		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "gpt-6-luna", StopReason: chat.StopReasonError, Content: []chat.ContentBlock{chat.Text("半截")}},
@@ -208,7 +208,7 @@ func TestTextSignatureRoundTrip(t *testing.T) {
 
 func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 	image := chat.ContentBlock{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")}
-	client := mustNew(Config{Model: "m1"})
+	client := mustNew(Config{Model: Model{Name: "m1", Compat: Compat{NoReasoning: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		chat.NewUserTextMessage("画一张"),
 		{Role: chat.RoleAssistant, Provider: "openai", API: API, Model: "m1", StopReason: chat.StopReasonToolUse,
@@ -227,7 +227,7 @@ func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 }
 
 func TestInfoImageReplayFollowsTextOnly(t *testing.T) {
-	if !mustNew(Config{Model: ModelGPT6Luna}).Info().ImageOutput || mustNew(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().ImageOutput {
+	if !mustNew(Config{Model: plain}).Info().ImageOutput || mustNew(Config{Model: plain, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().ImageOutput {
 		t.Fatal("ImageOutput should be off with TextOnly")
 	}
 }
@@ -238,14 +238,14 @@ func TestBuildParamsStructuredOutput(t *testing.T) {
 		Options:      chat.Options{Output: &chat.OutputFormat{Name: "city", Schema: json.RawMessage(`{"type":"object"}`)}},
 		Messages:     []chat.Message{chat.NewUserTextMessage("你好")},
 	}
-	params, err := mustNew(Config{Model: ModelGPT6Luna}).buildParams(req)
+	params, err := mustNew(Config{Model: plain}).buildParams(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := marshal(t, params); !strings.Contains(got, `"text":{"format":{"name":"city","schema":{"type":"object"},"strict":true,"type":"json_schema"}}`) {
 		t.Fatalf("should use the native json_schema format: %s", got)
 	}
-	params, err = mustNew(Config{Model: ModelGPT6Luna, Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}).buildParams(req)
+	params, err = mustNew(Config{Model: plain, Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}).buildParams(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestBuildParamsToolChoice(t *testing.T) {
 		chat.ForceTool("lookup"):        `"tool_choice":{"name":"lookup","type":"function"}`,
 	} {
 		req.ToolChoice = choice
-		params, err := mustNew(Config{Model: ModelGPT6Luna}).buildParams(req)
+		params, err := mustNew(Config{Model: plain}).buildParams(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,14 +274,14 @@ func TestBuildParamsToolChoice(t *testing.T) {
 		}
 	}
 	req.Tools = nil
-	params, _ := mustNew(Config{Model: ModelGPT6Luna}).buildParams(req)
+	params, _ := mustNew(Config{Model: plain}).buildParams(req)
 	if got := marshal(t, params); strings.Contains(got, "tool_choice") {
 		t.Fatalf("ToolChoice should be ignored without tools: %s", got)
 	}
 }
 
 func TestConvertMediaKinds(t *testing.T) {
-	client := mustNew(Config{Model: ModelGPT6Luna})
+	client := mustNew(Config{Model: plain})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.MediaURL("https://example.com/a.webp"),
@@ -306,5 +306,21 @@ func TestConvertMediaKinds(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %s:\n%s", want, got)
 		}
+	}
+}
+
+// A model reasons unless it says it does not, the highest effort is xhigh, and no output limit is sent for a model that declares none.
+func TestBuildParamsReasoningIsTheDefault(t *testing.T) {
+	req := chat.Request{Options: chat.Options{Reasoning: chat.ReasoningMax}, Messages: []chat.Message{chat.NewUserTextMessage("你好")}}
+	got := marshal(t, mustParams(t, mustNew(Config{Model: Model{Name: "m"}}), req))
+	if !strings.Contains(got, `"effort":"xhigh"`) || !strings.Contains(got, `"include":["reasoning.encrypted_content"]`) {
+		t.Fatalf("a model should reason by default, max mapping to xhigh: %s", got)
+	}
+	if strings.Contains(got, `"max_output_tokens"`) {
+		t.Fatalf("no output limit should be sent when the model declares none: %s", got)
+	}
+	got = marshal(t, mustParams(t, mustNew(Config{Model: Model{Name: "m", MaxOutputTokens: 500, Compat: Compat{NoReasoning: true}}}), req))
+	if strings.Contains(got, `"reasoning"`) || strings.Contains(got, `"include"`) || !strings.Contains(got, `"max_output_tokens":500`) {
+		t.Fatalf("NoReasoning should send no reasoning parameters, and the model limit is the default: %s", got)
 	}
 }

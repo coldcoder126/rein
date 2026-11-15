@@ -20,7 +20,7 @@ func toolCallBlock(id, name, args string) chat.ContentBlock {
 }
 
 func TestBuildParamsAddsSystemPromptAndTools(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeHaiku4_5})
+	client := mustNew(Config{Model: haiku45})
 	params, err := client.buildParams(chat.Request{
 		SystemPrompt: "系统提示",
 		Messages:     []chat.Message{chat.NewUserTextMessage("你好")},
@@ -42,7 +42,7 @@ func TestBuildParamsAddsSystemPromptAndTools(t *testing.T) {
 }
 
 func TestBuildParamsTemperatureZeroIsSent(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: sonnet55})
 	params, err := client.buildParams(chat.Request{
 		Options:  chat.Options{Temperature: chat.Float(0)},
 		Messages: []chat.Message{chat.NewUserTextMessage("你好")},
@@ -92,7 +92,7 @@ func TestConvertAssistantKeepsBlockOrder(t *testing.T) {
 		{
 			Role:     chat.RoleAssistant,
 			Provider: providerName, API: API,
-			Model: ModelClaudeSonnet4_6,
+			Model: sonnet46.Name,
 			Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "先想", Signature: "sig1"},
 				chat.Text("我来查"),
@@ -128,9 +128,9 @@ func TestConvertAssistantKeepsBlockOrder(t *testing.T) {
 }
 
 func TestBuildParamsNormalizesReplay(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeHaiku4_5})
+	client := mustNew(Config{Model: haiku45})
 	failed := chat.Message{
-		Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelClaudeHaiku4_5,
+		Role: chat.RoleAssistant, Provider: providerName, API: API, Model: haiku45.Name,
 		Content: []chat.ContentBlock{chat.Text("半截")}, StopReason: chat.StopReasonError,
 	}
 	foreign := chat.Message{
@@ -224,7 +224,7 @@ func TestConvertToolResultWithImages(t *testing.T) {
 }
 
 func TestConvertMediaKinds(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: sonnet55})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{
 		{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.MediaURL("https://example.com/a.webp"),
@@ -232,7 +232,7 @@ func TestConvertMediaKinds(t *testing.T) {
 			chat.MediaURL("https://example.com/b.pdf"),
 			chat.Media([]byte("a,b\n1,2")).WithName("数据.csv"),
 		}},
-		{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: client.cfg.Model, Content: []chat.ContentBlock{toolCallBlock("c1", "export", `{}`)}},
+		{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: client.cfg.Model.Name, Content: []chat.ContentBlock{toolCallBlock("c1", "export", `{}`)}},
 		{Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{chat.Media([]byte("%PDF-1.7 报表")).WithName("报表.pdf")}},
 	}})
 	if err != nil {
@@ -271,17 +271,17 @@ func TestConvertMediaKinds(t *testing.T) {
 }
 
 func TestInfoReportsImageSupport(t *testing.T) {
-	info := mustNew(Config{Model: ModelClaudeSonnet5_5}).Info()
+	info := mustNew(Config{Model: sonnet55}).Info()
 	if !info.SupportsMedia || info.ImageLimits.MaxBytes == 0 {
 		t.Fatalf("should support media by default and give image specs: %+v", info)
 	}
-	if mustNew(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
+	if mustNew(Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
 		t.Fatal("TextOnly should turn media support off")
 	}
 }
 
 func TestBuildParamsReplacesImagesForTextOnlyEndpoint(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
+	client := mustNew(Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{{
 		Role:    chat.RoleUser,
 		Content: []chat.ContentBlock{chat.Text("看图"), imageBlock("image/png")},
@@ -319,24 +319,38 @@ func TestBuildParamsReasoning(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{"default thinking is stated to carry the block binding", Config{Model: ModelClaudeSonnet5_5}, chat.Options{},
+		{"default thinking is stated to carry the block binding", Config{Model: sonnet55}, chat.Options{},
 			[]string{`"thinking":{"type":"adaptive",` + `"block_binding":{"prefix_mismatch_behavior":"drop_block"}` + `}`}, []string{`"output_config"`}},
-		{"no thinking parameters with the binding off", Config{Model: ModelClaudeSonnet5_5, Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
-		{"the binding can reject instead", Config{Model: ModelClaudeOpus5_5, PrefixMismatch: PrefixMismatchError}, chat.Options{},
+		{"no thinking parameters with the binding off", Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
+		{"the binding can reject instead", Config{Model: opus55, PrefixMismatch: PrefixMismatchError}, chat.Options{},
 			[]string{`"prefix_mismatch_behavior":"error"`}, nil},
-		{"adaptive models use effort", Config{Model: ModelClaudeSonnet5_5}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},
+		{"adaptive models use effort", Config{Model: sonnet55}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},
 			[]string{`"thinking":{"display":"summarized","type":"adaptive",` + `"block_binding":{"prefix_mismatch_behavior":"drop_block"}` + `}`, `"effort":"xhigh"`}, []string{`"temperature"`}},
-		{"fall back to high without xhigh", Config{Model: ModelClaudeSonnet4_6}, chat.Options{Reasoning: chat.ReasoningXHigh},
+		{"fall back to high without xhigh", Config{Model: sonnet46}, chat.Options{Reasoning: chat.ReasoningXHigh},
 			[]string{`"type":"adaptive"`, `"effort":"high"`}, []string{`"block_binding"`}},
-		{"models that cannot turn thinking off use the lowest effort", Config{Model: ModelClaudeSonnet5_5}, chat.Options{Reasoning: chat.ReasoningOff},
+		{"models that cannot turn thinking off use the lowest effort", Config{Model: sonnet55}, chat.Options{Reasoning: chat.ReasoningOff},
 			[]string{`"effort":"low"`, `"block_binding":{"prefix_mismatch_behavior":"drop_block"}`}, nil},
-		{"models that can turn it off send disabled", Config{Model: ModelClaudeHaiku5_5}, chat.Options{Reasoning: chat.ReasoningOff, Temperature: chat.Float(0.2)},
+		{"models that can turn it off send disabled", Config{Model: haiku55}, chat.Options{Reasoning: chat.ReasoningOff, Temperature: chat.Float(0.2)},
 			[]string{`"thinking":{"type":"disabled"}`, `"temperature":0.2`}, []string{`"output_config"`, `"block_binding"`}},
-		{"older models use a budget and raise max_tokens", Config{Model: ModelClaudeHaiku4_5}, chat.Options{Reasoning: chat.ReasoningMedium, MaxTokens: 1000},
+		{"older models use a budget and raise max_tokens", Config{Model: haiku45}, chat.Options{Reasoning: chat.ReasoningMedium, MaxTokens: 1000},
 			[]string{`"budget_tokens":8192`, `"type":"enabled"`, `"max_tokens":9192`}, []string{`"output_config"`, `"block_binding"`}},
-		{"budget within the model output limit", Config{Model: ModelClaudeHaiku4_5, MaxOutputTokens: 4096}, chat.Options{Reasoning: chat.ReasoningHigh},
+		{"budget within the model output limit", Config{Model: Model{Name: "m", MaxOutputTokens: 4096, Compat: Compat{NoAdaptiveThinking: true}}}, chat.Options{Reasoning: chat.ReasoningHigh},
 			[]string{`"budget_tokens":3072`, `"max_tokens":4096`}, nil},
-		{"compatible endpoints force budget thinking", Config{Model: "deepseek-flash"}, chat.Options{Reasoning: chat.ReasoningLow},
+		{"an explicit max_tokens grows by the budget up to the model output limit", Config{Model: Model{Name: "m", MaxOutputTokens: 4096, Compat: Compat{NoAdaptiveThinking: true}}}, chat.Options{Reasoning: chat.ReasoningHigh, MaxTokens: 3000},
+			[]string{`"budget_tokens":3072`, `"max_tokens":4096`}, nil},
+		{"max is the highest effort", Config{Model: haiku55}, chat.Options{Reasoning: chat.ReasoningMax},
+			[]string{`"effort":"max"`}, nil},
+		{"fall back from max to xhigh", Config{Model: Model{Name: "m", Compat: Compat{NoMaxEffort: true}}}, chat.Options{Reasoning: chat.ReasoningMax},
+			[]string{`"effort":"xhigh"`}, nil},
+		{"fall back from max to high without xhigh", Config{Model: sonnet46}, chat.Options{Reasoning: chat.ReasoningMax},
+			[]string{`"effort":"high"`}, nil},
+		{"budget models that cannot turn thinking off use the smallest budget", Config{Model: Model{Name: "m", Compat: Compat{NoAdaptiveThinking: true, NoDisableThinking: true}}}, chat.Options{Reasoning: chat.ReasoningOff},
+			[]string{`"budget_tokens":1024`, `"type":"enabled"`}, []string{`"output_config"`}},
+		{"a model that declares no output limit uses the default max_tokens", Config{Model: Model{Name: "m"}}, chat.Options{},
+			[]string{`"max_tokens":32000`}, nil},
+		{"the model output limit is the default max_tokens", Config{Model: haiku45}, chat.Options{},
+			[]string{`"max_tokens":64000`}, nil},
+		{"models without adaptive thinking use a budget", Config{Model: thirdParty}, chat.Options{Reasoning: chat.ReasoningLow},
 			[]string{`"budget_tokens":2048`}, nil},
 	}
 	for _, tc := range cases {
@@ -354,13 +368,13 @@ func TestBuildParamsReasoning(t *testing.T) {
 			}
 		})
 	}
-	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
+	if _, err := mustNew(Config{Model: sonnet55}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
 		t.Fatal("an unknown reasoning level should fail")
 	}
 }
 
 func TestBuildParamsCacheBreakpoints(t *testing.T) {
-	client := mustNew(Config{Model: ModelClaudeSonnet5_5})
+	client := mustNew(Config{Model: sonnet55})
 	req := chat.Request{
 		SystemPrompt: "系统提示",
 		Messages: []chat.Message{
@@ -408,35 +422,17 @@ func TestConvertUnsignedThinking(t *testing.T) {
 	}
 }
 
-func TestInfoUsesModelSpec(t *testing.T) {
-	cases := []struct {
-		cfg        Config
-		input, out int
-	}{
-		{Config{Model: ModelClaudeSonnet5_5}, 1_000_000, 128_000},
-		{Config{Model: ModelClaudeHaiku4_5}, 200_000, 64_000},
-		{Config{Model: "other-model"}, 200_000, 8_192},
-		{Config{Model: ModelClaudeSonnet5_5, MaxInputTokens: 50_000, MaxOutputTokens: 2_000}, 50_000, 2_000},
-	}
-	for _, tc := range cases {
-		info := mustNew(tc.cfg).Info()
-		if info.MaxInputTokens != tc.input || info.MaxOutputTokens != tc.out {
-			t.Fatalf("%q has the wrong spec: %+v", tc.cfg.Model, info)
-		}
-	}
-}
-
 func TestBuildParamsStructuredOutput(t *testing.T) {
 	output := chat.Options{Reasoning: chat.ReasoningLow, Output: &chat.OutputFormat{Schema: json.RawMessage(`{"type":"object"}`)}}
-	got := paramsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), chat.Request{Options: output})
+	got := paramsJSON(t, mustNew(Config{Model: sonnet55}), chat.Request{Options: output})
 	if !strings.Contains(got, `"output_config":{"effort":"low","format":{"schema":{"type":"object"},"type":"json_schema"}}`) {
 		t.Fatalf("should use native output_config.format alongside effort: %s", got)
 	}
-	got = paramsJSON(t, mustNew(Config{Model: "deepseek-flash"}), chat.Request{SystemPrompt: "你是助手", Options: output})
+	got = paramsJSON(t, mustNew(Config{Model: thirdParty}), chat.Request{SystemPrompt: "你是助手", Options: output})
 	if strings.Contains(got, "json_schema") || !strings.Contains(got, `JSON Schema:\n\n{\"type\":\"object\"}`) {
 		t.Fatalf("compatible endpoints should write the schema into the system prompt: %s", got)
 	}
-	if mustNew(Config{Model: "deepseek-flash"}).Info().StructuredOutput || !mustNew(Config{Model: ModelClaudeSonnet5_5}).Info().StructuredOutput {
+	if mustNew(Config{Model: thirdParty}).Info().StructuredOutput || !mustNew(Config{Model: sonnet55}).Info().StructuredOutput {
 		t.Fatal("model info should reflect native structured output support")
 	}
 }
@@ -447,22 +443,22 @@ func TestBuildParamsToolChoice(t *testing.T) {
 		return chat.Request{Options: chat.Options{ToolChoice: choice, Reasoning: level}, Tools: tools}
 	}
 	required := chat.ToolChoice{Mode: chat.ToolChoiceRequired}
-	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeHaiku5_5}), req(chat.ForceTool("lookup"), chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"name":"lookup","type":"tool"}`) || !strings.Contains(got, `"type":"adaptive"`) {
+	if got := paramsJSON(t, mustNew(Config{Model: haiku55}), req(chat.ForceTool("lookup"), chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"name":"lookup","type":"tool"}`) || !strings.Contains(got, `"type":"adaptive"`) {
 		t.Fatalf("adaptive thinking models should keep both thinking and the forced tool: %s", got)
 	}
-	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeHaiku4_5}), req(required, chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"type":"any"}`) || strings.Contains(got, `"thinking"`) {
+	if got := paramsJSON(t, mustNew(Config{Model: haiku45}), req(required, chat.ReasoningHigh)); !strings.Contains(got, `"tool_choice":{"type":"any"}`) || strings.Contains(got, `"thinking"`) {
 		t.Fatalf("budget thinking models should not enable thinking with forced tool calls: %s", got)
 	}
-	if got := paramsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
+	if got := paramsJSON(t, mustNew(Config{Model: sonnet55}), req(chat.ToolChoice{Mode: chat.ToolChoiceNone}, "")); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
 		t.Fatalf("should send none: %s", got)
 	}
 	r := req(required, "")
 	r.Messages = []chat.Message{chat.NewUserTextMessage("hi")}
-	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
+	if _, err := mustNew(Config{Model: sonnet55}).buildParams(r); err == nil || !strings.Contains(err.Error(), "does not support forced tool calls") {
 		t.Fatalf("models that cannot turn thinking off should reject forced tool calls: %v", err)
 	}
 	r.Tools = nil
-	if _, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(r); err != nil {
+	if _, err := mustNew(Config{Model: sonnet55}).buildParams(r); err != nil {
 		t.Fatalf("ToolChoice should be ignored without tools: %v", err)
 	}
 }

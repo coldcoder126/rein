@@ -1,66 +1,10 @@
 package anthropic
 
 import (
-	"cmp"
-	"strings"
-
 	goanthropic "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/coldcoder126/rein/chat"
 )
-
-// modelSpec is a model's built-in spec, taken from Anthropic's model list API (/v1/models).
-type modelSpec struct {
-	maxInput  int
-	maxOutput int
-	// budgetThinking means the model only supports budget thinking (thinking.type=enabled + budget_tokens);
-	// otherwise adaptive thinking is used (thinking.type=adaptive + output_config.effort).
-	budgetThinking bool
-	// noXHigh means effort does not support xhigh.
-	noXHigh bool
-	// alwaysThinks means the model does not accept thinking.type=disabled.
-	alwaysThinks bool
-	// structuredOutput means the model supports JSON Schema constraints via output_config.format.
-	structuredOutput bool
-	// toolSearch means the model supports the server-side tool search, which deferred tools need.
-	toolSearch bool
-	// thinksByDefault means the model thinks when the request sets no thinking (Claude 5 and later). These models accept
-	// thinking.block_binding, and some bind thinking blocks to the conversation that produced them.
-	thinksByDefault bool
-}
-
-// specFor returns the spec for a model name. Unknown Claude models are treated as the latest generation; non-Claude models (compatible endpoints) get conservative values.
-func specFor(model string) modelSpec {
-	current := modelSpec{maxInput: 1_000_000, maxOutput: 128_000, structuredOutput: true, toolSearch: true, thinksByDefault: !strings.Contains(model, "-4-")}
-	switch {
-	case !strings.HasPrefix(model, "claude-"):
-		return modelSpec{maxInput: 200_000, maxOutput: 8_192, budgetThinking: true}
-	case strings.HasPrefix(model, "claude-3"):
-		return modelSpec{maxInput: 200_000, maxOutput: 64_000, budgetThinking: true, structuredOutput: true}
-	case strings.Contains(model, "-4-5"):
-		return modelSpec{maxInput: 200_000, maxOutput: 64_000, budgetThinking: true, structuredOutput: true, toolSearch: true}
-	case strings.Contains(model, "-4-6"):
-		current.noXHigh = true
-	case strings.Contains(model, "sonnet-5-5"), strings.Contains(model, "opus-5-5"), strings.Contains(model, "fable"):
-		current.alwaysThinks = true
-	}
-	return current
-}
-
-// spec returns the spec of the model used by this request; values set in Config take precedence, then the endpoint's.
-func (c *Client) spec(model string) modelSpec {
-	s := specFor(model)
-	if n := cmp.Or(c.cfg.MaxInputTokens, c.cfg.Endpoint.MaxInputTokens); n > 0 {
-		s.maxInput = n
-	}
-	if n := cmp.Or(c.cfg.MaxOutputTokens, c.cfg.Endpoint.MaxOutputTokens); n > 0 {
-		s.maxOutput = n
-	}
-	if c.cfg.Endpoint.Compat.NoAdaptiveThinking {
-		s.budgetThinking = true
-	}
-	return s
-}
 
 const (
 	minThinkingBudget = 1024
@@ -73,44 +17,49 @@ var thinkingBudgets = map[chat.ReasoningLevel]int64{
 	chat.ReasoningMedium: 8_192,
 	chat.ReasoningHigh:   16_384,
 	chat.ReasoningXHigh:  32_768,
+	chat.ReasoningMax:    65_536,
 }
 
 // applyReasoning sets thinking / output_config from the provider-neutral effort and reports whether thinking is on for this request.
-// maxTokensExplicit means max_tokens is the answer limit set by the caller: budget thinking shares max_tokens with the answer,
-// so the budget is added to the limit to keep thinking from crowding out the answer.
-func applyReasoning(params *goanthropic.MessageNewParams, level chat.ReasoningLevel, spec modelSpec, maxTokensExplicit bool) (bool, error) {
-	switch level {
-	case "":
-		return false, nil
-	case chat.ReasoningOff:
-		if spec.alwaysThinks {
-			params.OutputConfig.Effort = goanthropic.OutputConfigEffortLow
-			return true, nil
-		}
-		params.Thinking = goanthropic.ThinkingConfigParamUnion{OfDisabled: &goanthropic.ThinkingConfigDisabledParam{}}
+// maxOutput is the model's output limit, 0 when it declares none. maxTokensExplicit means max_tokens is the answer limit set by the
+// caller: budget thinking shares max_tokens with the answer, so the budget is added to the limit to keep thinking from crowding out the answer.
+func applyReasoning(params *goanthropic.MessageNewParams, level chat.ReasoningLevel, compat Compat, maxOutput int, maxTokensExplicit bool) (bool, error) {
+	if level == "" {
 		return false, nil
 	}
 	budget, ok := thinkingBudgets[level]
-	if !ok {
+	switch {
+	case level == chat.ReasoningOff && !compat.NoDisableThinking:
+		params.Thinking = goanthropic.ThinkingConfigParamUnion{OfDisabled: &goanthropic.ThinkingConfigDisabledParam{}}
+		return false, nil
+	case level == chat.ReasoningOff:
+		// Thinking stays on at the lowest effort.
+		level, budget = chat.ReasoningLow, minThinkingBudget
+	case !ok:
 		return false, &chat.Error{Kind: chat.KindInvalidRequest, Message: "anthropic: unknown reasoning level " + string(level)}
 	}
 
-	if !spec.budgetThinking {
-		effort := goanthropic.OutputConfigEffort(level)
-		if level == chat.ReasoningXHigh && spec.noXHigh {
-			effort = goanthropic.OutputConfigEffortHigh
+	if !compat.NoAdaptiveThinking {
+		if level == chat.ReasoningMax && compat.NoMaxEffort {
+			level = chat.ReasoningXHigh
+		}
+		if level == chat.ReasoningXHigh && compat.NoXHigh {
+			level = chat.ReasoningHigh
 		}
 		params.Thinking = goanthropic.ThinkingConfigParamUnion{OfAdaptive: &goanthropic.ThinkingConfigAdaptiveParam{
 			Display: goanthropic.ThinkingConfigAdaptiveDisplaySummarized,
 		}}
-		params.OutputConfig.Effort = effort
+		params.OutputConfig.Effort = goanthropic.OutputConfigEffort(level)
 		return true, nil
 	}
 
 	answer := int64(minAnswerTokens)
 	if maxTokensExplicit {
 		answer = min(answer, params.MaxTokens)
-		params.MaxTokens = min(params.MaxTokens+budget, int64(spec.maxOutput))
+		params.MaxTokens += budget
+		if maxOutput > 0 {
+			params.MaxTokens = min(params.MaxTokens, int64(maxOutput))
+		}
 	}
 	budget = min(budget, params.MaxTokens-answer)
 	if budget < minThinkingBudget {

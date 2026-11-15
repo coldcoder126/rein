@@ -133,14 +133,10 @@ func (c *usageRecorderClient) record(ctx context.Context, req Request, method st
 	if provider == "" {
 		provider = info.Provider
 	}
-	model := req.Options.Model
-	if model == "" {
-		model = info.Model
-	}
 	usageCtx := UsageContextFromContext(ctx)
 	event := UsageEvent{
 		Provider:  provider,
-		Model:     model,
+		Model:     info.Model,
 		Method:    method,
 		Usage:     usage,
 		StartedAt: startedAt,

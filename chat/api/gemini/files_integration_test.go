@@ -7,7 +7,7 @@ import (
 )
 
 func TestIntegrationFiles(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
+	client := integrationClient(t, Config{Model: flash35})
 	if client.Info().FileScope == "" {
 		t.Skip("needs a Gemini API key: Vertex has no Files API")
 	}

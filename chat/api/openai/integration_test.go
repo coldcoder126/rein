@@ -29,13 +29,13 @@ func integrationClient(t *testing.T, cfg Config) *Client {
 	cfg.APIKey = chattest.EnvKey(t, "OPENAI_API_KEY", "openai-api-key")
 	cfg.Timeout = 120 * time.Second
 	if m := os.Getenv("REIN_OPENAI_MODEL"); m != "" {
-		cfg.Model = m
+		cfg.Model.Name = m
 	}
 	return mustNew(cfg)
 }
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGPT6Luna})
+	client := integrationClient(t, Config{Model: plain})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func TestIntegrationStreamText(t *testing.T) {
 // Two rounds of tool calls: the second must send back the first round's reasoning items, message ids and function_call ids unchanged;
 // the server rejects any signature replayed wrongly.
 func TestIntegrationToolCallReplay(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGPT6Luna, Reasoning: true})
+	client := integrationClient(t, Config{Model: luna})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -115,7 +115,7 @@ func hasSignedThinking(m *chat.Message) bool {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGPT6Luna})
+	client := integrationClient(t, Config{Model: plain})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -152,7 +152,7 @@ func TestIntegrationImageGeneration(t *testing.T) {
 	if os.Getenv("REIN_INTEGRATION_IMAGEGEN") != "1" {
 		t.Skip("set REIN_INTEGRATION_IMAGEGEN=1 to run (image generation is billed)")
 	}
-	client := integrationClient(t, Config{Model: ModelGPT6Luna, ImageGeneration: true})
+	client := integrationClient(t, Config{Model: plain, ImageGeneration: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -192,7 +192,7 @@ func TestIntegrationImageGeneration(t *testing.T) {
 
 // The second round sends back the first round's reasoning item (with encrypted content) and message id unchanged; acceptance by the server proves stateless replay works.
 func TestIntegrationReasoningReplay(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGPT6Luna, Reasoning: true})
+	client := integrationClient(t, Config{Model: luna})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -237,7 +237,7 @@ var cityRequest = chat.Request{Messages: []chat.Message{chat.NewUserTextMessage(
 
 // Structured output: native constraints, and prompt injection plus local validation for endpoints without native constraints.
 func TestIntegrationStructuredOutput(t *testing.T) {
-	for name, cfg := range map[string]Config{"native": {}, "fallback": {Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}} {
+	for name, cfg := range map[string]Config{"native": {Model: plain}, "fallback": {Model: plain, Endpoint: Endpoint{Compat: Compat{NoStructuredOutput: true}}}} {
 		t.Run(name, func(t *testing.T) {
 			var payload string
 			cfg.HTTPHooks = chat.HTTPHooks{OnPayload: func(_ context.Context, body []byte) []byte { payload = string(body); return nil }}
@@ -271,7 +271,7 @@ func TestIntegrationToolChoice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := integrationClient(t, Config{Model: ModelGPT6Luna})
+			client := integrationClient(t, Config{Model: plain})
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			msg, err := chat.Complete(ctx, client, chat.Request{

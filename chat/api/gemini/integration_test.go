@@ -75,7 +75,7 @@ var metricTool = []chat.ToolDef{{
 }}
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
+	client := integrationClient(t, Config{Model: flash35})
 	msg := mustDone(t, client, chat.Request{
 		Options:  chat.Options{MaxTokens: 512},
 		Messages: []chat.Message{chat.NewUserTextMessage("请原样输出这个单词，不要输出别的内容：pong")},
@@ -90,9 +90,9 @@ func TestIntegrationStreamText(t *testing.T) {
 
 // Every model generation should accept the thinking parameters.
 func TestIntegrationReasoningLevels(t *testing.T) {
-	for _, model := range []string{ModelGemini3_5Flash, ModelGemini3_1ProPreview, ModelGemini2_5Flash} {
+	for _, model := range []Model{flash35, pro31, flash25} {
 		for _, level := range []chat.ReasoningLevel{"", chat.ReasoningOff, chat.ReasoningLow, chat.ReasoningXHigh} {
-			t.Run(model+"/"+string(level), func(t *testing.T) {
+			t.Run(model.Name+"/"+string(level), func(t *testing.T) {
 				client := integrationClient(t, Config{Model: model})
 				msg := mustDone(t, client, chat.Request{
 					Options:  chat.Options{Reasoning: level, Temperature: chat.Float(1)},
@@ -108,8 +108,8 @@ func TestIntegrationReasoningLevels(t *testing.T) {
 
 // Two rounds of tool calls: the second must send the first round's thoughtSignature back on its original part.
 func TestIntegrationThinkingToolReplay(t *testing.T) {
-	for _, model := range []string{ModelGemini3_5Flash, ModelGemini2_5Flash} {
-		t.Run(model, func(t *testing.T) {
+	for _, model := range []Model{flash35, flash25} {
+		t.Run(model.Name, func(t *testing.T) {
 			client := integrationClient(t, Config{Model: model})
 			req := chat.Request{
 				SystemPrompt: "你是测试助手。需要数据时必须先调用工具，不要编造。",
@@ -160,7 +160,7 @@ func TestIntegrationThinkingToolReplay(t *testing.T) {
 
 // Tool calls left by other models have no thought signature and should not be rejected when replayed to Gemini.
 func TestIntegrationForeignToolHistory(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
+	client := integrationClient(t, Config{Model: flash35})
 	msg := mustDone(t, client, chat.Request{
 		Tools: metricTool,
 		Messages: []chat.Message{
@@ -180,7 +180,7 @@ func TestIntegrationForeignToolHistory(t *testing.T) {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelGemini3_5Flash})
+	client := integrationClient(t, Config{Model: flash35})
 	msg := mustDone(t, client, chat.Request{
 		Messages: []chat.Message{{Role: chat.RoleUser, Content: []chat.ContentBlock{
 			chat.Text("这张图是什么颜色？只回答一个英文单词。"),
@@ -194,8 +194,8 @@ func TestIntegrationImageInput(t *testing.T) {
 
 // Images in tool results: embedded in functionResponse on Gemini 3, separate parts on 2.x.
 func TestIntegrationToolResultImage(t *testing.T) {
-	for _, model := range []string{ModelGemini3_5Flash, ModelGemini2_5Flash} {
-		t.Run(model, func(t *testing.T) {
+	for _, model := range []Model{flash35, flash25} {
+		t.Run(model.Name, func(t *testing.T) {
 			client := integrationClient(t, Config{Model: model})
 			req := chat.Request{
 				Tools:    []chat.ToolDef{{Name: "screenshot", Description: "截取当前屏幕并把图片返回给你，你可以直接看到图片内容", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)}},
@@ -219,8 +219,8 @@ func TestIntegrationToolResultImage(t *testing.T) {
 }
 
 func TestIntegrationStructuredOutput(t *testing.T) {
-	for _, model := range []string{ModelGemini3_5Flash, ModelGemini2_5Flash} {
-		t.Run(model, func(t *testing.T) {
+	for _, model := range []Model{flash35, flash25} {
+		t.Run(model.Name, func(t *testing.T) {
 			client := integrationClient(t, Config{Model: model})
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
@@ -236,7 +236,11 @@ func TestIntegrationImageGeneration(t *testing.T) {
 	if model == "" {
 		t.Skip("set REIN_GEMINI_IMAGE_MODEL to run the image generation test")
 	}
-	client := integrationClient(t, Config{Model: model, ImageGeneration: true})
+	imageModel := Model{Name: model}
+	if strings.HasPrefix(model, "gemini-2") {
+		imageModel.Compat = gemini2
+	}
+	client := integrationClient(t, Config{Model: imageModel, ImageGeneration: true})
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("生成一张纯蓝色的正方形图片。")}}
 	first := mustDone(t, client, req)
 	images := 0
@@ -276,7 +280,7 @@ var cityRequest = chat.Request{Messages: []chat.Message{chat.NewUserTextMessage(
 
 // Excludes gemini-3.5-flash: in testing, forced tool calls (mode=ANY) on Vertex intermittently hang on the server,
 // regardless of the thinking config; other models are fine.
-var toolChoiceModels = []string{"gemini-3-flash-preview", ModelGemini2_5Flash}
+var toolChoiceModels = []Model{{Name: "gemini-3-flash-preview"}, flash25}
 
 // Tool choice constraints: required, none, and a specific tool.
 func TestIntegrationToolChoice(t *testing.T) {
@@ -297,7 +301,7 @@ func TestIntegrationToolChoice(t *testing.T) {
 	for _, model := range toolChoiceModels {
 		for _, tc := range cases {
 			for _, level := range []chat.ReasoningLevel{"", chat.ReasoningHigh} {
-				t.Run(model+"/"+tc.name+"/"+string(level), func(t *testing.T) {
+				t.Run(model.Name+"/"+tc.name+"/"+string(level), func(t *testing.T) {
 					client := integrationClient(t, Config{Model: model})
 					msg := mustDone(t, client, chat.Request{
 						Options:  chat.Options{ToolChoice: tc.choice, Reasoning: level},

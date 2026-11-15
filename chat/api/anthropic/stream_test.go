@@ -28,7 +28,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return mustNew(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: ModelClaudeSonnet4_6, MaxRetries: 0})
+	return mustNew(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: sonnet46, MaxRetries: 0})
 }
 
 func serveSSE(body string) http.HandlerFunc {
@@ -83,7 +83,7 @@ func TestStreamThinkingTextAndToolCalls(t *testing.T) {
 	if len(calls) != 2 || calls[0].ID != "toolu_1" || string(calls[0].Arguments) != `{"q":"a"}` || string(calls[1].Arguments) != `{}` {
 		t.Fatalf("wrong tool calls: %+v", calls)
 	}
-	if msg.Provider != "anthropic" || msg.Model != ModelClaudeSonnet4_6 || msg.ResponseID != "msg_1" || msg.ResponseModel != "claude-real" {
+	if msg.Provider != "anthropic" || msg.Model != sonnet46.Name || msg.ResponseID != "msg_1" || msg.ResponseModel != "claude-real" {
 		t.Fatalf("wrong message metadata: %+v", msg)
 	}
 	if msg.Usage.Input != 10 || msg.Usage.Output != 42 || msg.Usage.CacheRead != 4 || msg.Usage.TotalTokens != 56 {
@@ -193,13 +193,13 @@ func TestStreamCancellationIsAborted(t *testing.T) {
 
 func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
 	cases := []struct {
-		model string
+		model Model
 		cfg   Config
 		want  []string
 	}{
-		{ModelClaudeSonnet5_5, Config{Headers: map[string]string{"anthropic-beta": "other-beta"}}, []string{"other-beta", prefixMismatchBeta}},
-		{ModelClaudeSonnet5_5, Config{Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, nil},
-		{ModelClaudeSonnet4_6, Config{}, nil},
+		{sonnet55, Config{Headers: map[string]string{"anthropic-beta": "other-beta"}}, []string{"other-beta", prefixMismatchBeta}},
+		{sonnet55, Config{Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, nil},
+		{sonnet46, Config{}, nil},
 	}
 	for _, tc := range cases {
 		var got []string
@@ -213,7 +213,7 @@ func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
 		}
 		server.Close()
 		if !slices.Equal(got, tc.want) {
-			t.Fatalf("%s %+v: anthropic-beta = %v, want %v", tc.model, tc.cfg, got, tc.want)
+			t.Fatalf("%s %+v: anthropic-beta = %v, want %v", tc.model.Name, tc.cfg, got, tc.want)
 		}
 	}
 }

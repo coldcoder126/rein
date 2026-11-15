@@ -37,7 +37,7 @@ func toolsJSON(t *testing.T, client *Client, req chat.Request) []map[string]any 
 func TestDeferredToolsUseToolSearch(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
 
-	tools := toolsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5}), req)
+	tools := toolsJSON(t, mustNew(Config{Model: sonnet55}), req)
 	if len(tools) != 3 || tools[0]["name"] != "quote" || tools[1]["name"] != "report" {
 		t.Fatalf("own tools should keep their order with the search tool appended: %v", tools)
 	}
@@ -48,7 +48,7 @@ func TestDeferredToolsUseToolSearch(t *testing.T) {
 		t.Fatalf("regex search should be the default: %v", tools[2])
 	}
 
-	tools = toolsJSON(t, mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchBM25}), req)
+	tools = toolsJSON(t, mustNew(Config{Model: sonnet55, ToolSearch: ToolSearchBM25}), req)
 	if tools[2]["type"] != "tool_search_tool_bm25_20251119" {
 		t.Fatalf("BM25 search was asked for: %v", tools[2])
 	}
@@ -57,10 +57,10 @@ func TestDeferredToolsUseToolSearch(t *testing.T) {
 func TestToolSearchIsSkippedWhenUnavailable(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}, Tools: searchTools}
 	for name, client := range map[string]*Client{
-		"off":              mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}),
-		"non-claude":       mustNew(Config{Model: "deepseek-v4-pro", Endpoint: Endpoint{BaseURL: "http://example.invalid"}}),
-		"older model":      mustNew(Config{Model: "claude-3-7-sonnet"}),
-		"nothing to defer": mustNew(Config{Model: ModelClaudeSonnet5_5}),
+		"off":              mustNew(Config{Model: sonnet55, ToolSearch: ToolSearchOff}),
+		"model without":    mustNew(Config{Model: thirdParty}),
+		"endpoint without": mustNew(Config{Model: sonnet55, Endpoint: Endpoint{BaseURL: "http://example.invalid", Compat: Compat{NoToolSearch: true}}}),
+		"nothing to defer": mustNew(Config{Model: sonnet55}),
 	} {
 		r := req
 		if name == "nothing to defer" {
@@ -87,7 +87,7 @@ func searchHistory() []chat.Message {
 	return []chat.Message{
 		chat.NewUserTextMessage("看看财报"),
 		{
-			Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelClaudeSonnet5_5, StopReason: chat.StopReasonToolUse,
+			Role: chat.RoleAssistant, Provider: providerName, API: API, Model: sonnet55.Name, StopReason: chat.StopReasonToolUse,
 			Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeServerTool, Name: "tool_search_tool_bm25", Raw: json.RawMessage(searchCallRaw)},
 				{Type: chat.ContentTypeServerTool, Name: "tool_search_tool_result", Raw: json.RawMessage(searchResultRaw)},
@@ -99,7 +99,7 @@ func searchHistory() []chat.Message {
 }
 
 func TestServerToolRecordsAreReplayedVerbatim(t *testing.T) {
-	params, err := mustNew(Config{Model: ModelClaudeSonnet5_5}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
+	params, err := mustNew(Config{Model: sonnet55}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestServerToolRecordsAreReplayedVerbatim(t *testing.T) {
 	}
 
 	// Without tool search the records cannot be resolved and are left out; the tool call itself stays.
-	params, err = mustNew(Config{Model: ModelClaudeSonnet5_5, ToolSearch: ToolSearchOff}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
+	params, err = mustNew(Config{Model: sonnet55, ToolSearch: ToolSearchOff}).buildParams(chat.Request{Messages: searchHistory(), Tools: searchTools})
 	if err != nil {
 		t.Fatal(err)
 	}

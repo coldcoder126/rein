@@ -40,7 +40,7 @@ weather := tool.New("get_weather", "Get the current weather of a city.",
 		return tool.Text(in.City + ": sunny, 22°C"), nil
 	})
 
-model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.Model{Name: "claude-sonnet-5-5"}})
 if err != nil {
 	log.Fatal(err)
 }
@@ -85,16 +85,27 @@ Define tools → put them in an `agent.Agent` → hand the Agent and a store to 
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | Tools of MCP servers, over stdio or Streamable HTTP |
 | `x/...` | Experimental packages, not covered by any stability promise |
 
-## Compatible endpoints
+## Models and compatible endpoints
 
-Another vendor speaking the Anthropic or OpenAI protocol is configured with `Config.Endpoint`: its address, the vendor name, its models' limits, and in `Compat` what it lacks compared with the protocol's own service. rein ships no vendor presets. For DeepSeek, for example (as tested; check the vendor's current docs):
+A client talks to one model, described by `Config.Model`; another model is another client. Only `Name` is required: a model is taken to speak the whole protocol, and `Compat` lists what it lacks. rein has no table of models, so a new model needs no new release. Declare `MaxInputTokens` to let the runner compact history, and `MaxOutputTokens` to set the default output limit.
 
-| Protocol | `BaseURL` | Limits (input / output) | `Compat` |
-|---|---|---|---|
-| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` |
-| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`, `NoStructuredOutput`, `NoToolSearch` |
+```go
+anthropic.Model{
+	Name:            "claude-sonnet-5-5",
+	MaxInputTokens:  1_000_000,
+	MaxOutputTokens: 128_000,
+	Compat:          anthropic.Compat{NoDisableThinking: true}, // thinking cannot be turned off
+}
+```
 
-Set `Provider: "deepseek"` on either. Add `NoMedia` for models that take no images.
+Another vendor speaking the Anthropic or OpenAI protocol is a `Config.Endpoint`: its address, the vendor name, how the key is sent (`Auth`), and a `Compat` of its own for what every model of the service lacks. A client lacks whatever its endpoint or its model lacks. rein ships no vendor presets. For DeepSeek, for example (as tested; check the vendor's current docs):
+
+| Protocol | `BaseURL` | Limits (input / output) | Endpoint `Compat` | Model `Compat` |
+|---|---|---|---|---|
+| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` | `NoAdaptiveThinking`, `NoStructuredOutput`, `NoToolSearch` |
+| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`, `NoStructuredOutput`, `NoToolSearch` | |
+
+Set `Provider: "deepseek"` on either. Add `NoMedia` for models that take no images, and on the OpenAI protocol `NoReasoning` for models that do not reason.
 
 ## Examples
 

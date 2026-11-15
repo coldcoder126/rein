@@ -38,13 +38,12 @@ func TestWithUsageRecorderStream(t *testing.T) {
 		Metadata: map[string]string{"run_id": "run-1", "shared": "ctx"},
 	})
 	msg, err := chat.Complete(ctx, wrapped, chat.Request{Options: chat.Options{
-		Model:    "request-model",
 		Metadata: map[string]string{"purpose": "answer", "shared": "req"},
 	}})
 	if err != nil || msg.TextContent() != "ok" {
 		t.Fatalf("should not affect the main call: msg=%+v err=%v", msg, err)
 	}
-	if got.Provider != "deepseek" || got.Model != "request-model" || got.Method != "stream" || got.Error != "" {
+	if got.Provider != "deepseek" || got.Model != "default-model" || got.Method != "stream" || got.Error != "" {
 		t.Fatalf("wrong basic usage fields: %+v", got)
 	}
 	if got.Usage.Input != 10 || got.Usage.Output != 3 || got.Usage.CacheRead != 2 || got.Usage.TotalTokens != 15 {

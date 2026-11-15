@@ -13,10 +13,10 @@ func TestFileScope(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{Config{Model: ModelGemini3_5Flash}, "gemini"},
-		{Config{Model: ModelGemini3_5Flash, Vertex: true}, ""},
-		{Config{Model: ModelGemini3_5Flash, BaseURL: "https://proxy.example.com"}, ""},
-		{Config{Model: ModelGemini3_5Flash, FileScope: "gemini/prod"}, "gemini/prod"},
+		{Config{Model: flash35}, "gemini"},
+		{Config{Model: flash35, Vertex: true}, ""},
+		{Config{Model: flash35, BaseURL: "https://proxy.example.com"}, ""},
+		{Config{Model: flash35, FileScope: "gemini/prod"}, "gemini/prod"},
 	} {
 		if got := mustNew(tc.cfg).Info().FileScope; got != tc.want {
 			t.Fatalf("%+v: FileScope = %q, want %q", tc.cfg, got, tc.want)
@@ -26,7 +26,7 @@ func TestFileScope(t *testing.T) {
 
 func TestBuildRequestReferencesFiles(t *testing.T) {
 	uri := "https://generativelanguage.googleapis.com/v1beta/files/abc"
-	contents, _, err := mustNew(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Messages: []chat.Message{{Role: chat.RoleUser,
+	contents, _, err := mustNew(Config{Model: flash35}).buildRequest(chat.Request{Messages: []chat.Message{{Role: chat.RoleUser,
 		Content: []chat.ContentBlock{chat.MediaURL("https://example.com/a.mp4").WithFile(chat.FileRef{Scope: "gemini", ID: uri})}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -38,10 +38,10 @@ func TestBuildRequestReferencesFiles(t *testing.T) {
 
 func TestUploadFileChecksArguments(t *testing.T) {
 	ctx := context.Background()
-	if _, err := mustNew(Config{Model: ModelGemini3_5Flash, Vertex: true}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 0); err == nil {
+	if _, err := mustNew(Config{Model: flash35, Vertex: true}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 0); err == nil {
 		t.Fatal("Vertex has no Files API")
 	}
-	if _, err := mustNew(Config{Model: ModelGemini3_5Flash}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 3600e9); err == nil {
+	if _, err := mustNew(Config{Model: flash35}).UploadFile(ctx, "a", "text/plain", strings.NewReader(""), 3600e9); err == nil {
 		t.Fatal("the Gemini API takes no ttl")
 	}
 }

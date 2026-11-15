@@ -13,9 +13,9 @@ import (
 )
 
 // toolSearchVariant returns the tool search to add to this request, or "" when the request goes without one:
-// it needs deferred tools, a model that supports tool search, and a client that has not turned it off.
-func (c *Client) toolSearchVariant(spec modelSpec, tools []chat.ToolDef) ToolSearch {
-	if !spec.toolSearch || c.cfg.ToolSearch == ToolSearchOff {
+// it needs deferred tools, an endpoint and model that support tool search, and a client that has not turned it off.
+func (c *Client) toolSearchVariant(tools []chat.ToolDef) ToolSearch {
+	if c.compat.NoToolSearch || c.cfg.ToolSearch == ToolSearchOff {
 		return ""
 	}
 	if !slices.ContainsFunc(tools, func(def chat.ToolDef) bool { return def.Deferred }) {

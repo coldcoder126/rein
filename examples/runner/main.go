@@ -16,7 +16,16 @@ import (
 )
 
 func main() {
-	model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+	model, err := anthropic.New(anthropic.Config{
+		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+		// The context limit is what tells the runner when to compact history; Compat says what the model lacks.
+		Model: anthropic.Model{
+			Name:            "claude-sonnet-5-5",
+			MaxInputTokens:  1_000_000,
+			MaxOutputTokens: 128_000,
+			Compat:          anthropic.Compat{NoDisableThinking: true},
+		},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

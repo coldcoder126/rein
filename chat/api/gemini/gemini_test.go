@@ -35,7 +35,7 @@ func serve(t *testing.T, body *string, status int, chunks ...string) *Client {
 		}
 	}))
 	t.Cleanup(server.Close)
-	return mustNew(Config{Model: ModelGemini3_5Flash, APIKey: "test", BaseURL: server.URL})
+	return mustNew(Config{Model: flash35, APIKey: "test", BaseURL: server.URL})
 }
 
 func run(t *testing.T, client *Client, req chat.Request) chat.Event {
@@ -139,7 +139,7 @@ func TestRequestBody(t *testing.T) {
 		Messages: []chat.Message{
 			{Role: chat.RoleUser, Content: []chat.ContentBlock{chat.Text("看图"), {Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")},
 				chat.MediaURL("https://example.com/clip.mp4"), chat.Media([]byte("PK\x03\x04")).WithName("表格.xlsx")}},
-			{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: ModelGemini3_5Flash, Content: []chat.ContentBlock{
+			{Role: chat.RoleAssistant, Provider: providerName, API: API, Model: flash35.Name, Content: []chat.ContentBlock{
 				{Type: chat.ContentTypeThinking, Text: "无签名的思考"},
 				call("call_1", "c2lnMQ=="), call(generatedIDPrefix+"1", ""),
 			}},
@@ -187,30 +187,31 @@ func TestRequestBody(t *testing.T) {
 
 func TestThinkingConfigByModel(t *testing.T) {
 	cases := []struct {
-		model string
+		model Model
 		level chat.ReasoningLevel
 		want  string
 	}{
-		{ModelGemini3_5Flash, "", `{"includeThoughts":true}`},
-		{ModelGemini3_5Flash, chat.ReasoningOff, `{"thinkingBudget":0}`},
-		{ModelGemini3_5Flash, chat.ReasoningXHigh, `{"includeThoughts":true,"thinkingLevel":"HIGH"}`},
-		{ModelGemini2_5Flash, chat.ReasoningOff, `{"thinkingBudget":0}`},
-		{ModelGemini2_5Flash, chat.ReasoningLow, `{"includeThoughts":true,"thinkingBudget":2048}`},
+		{flash35, "", `{"includeThoughts":true}`},
+		{flash35, chat.ReasoningOff, `{"thinkingBudget":0}`},
+		{flash35, chat.ReasoningXHigh, `{"includeThoughts":true,"thinkingLevel":"HIGH"}`},
+		{flash35, chat.ReasoningMax, `{"includeThoughts":true,"thinkingLevel":"HIGH"}`},
+		{flash25, chat.ReasoningOff, `{"thinkingBudget":0}`},
+		{flash25, chat.ReasoningLow, `{"includeThoughts":true,"thinkingBudget":2048}`},
 	}
 	for _, tc := range cases {
-		cfg, err := thinkingConfig(tc.model, tc.level)
+		cfg, err := thinkingConfig(tc.model.Compat.NoThinkingLevel, tc.level)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if raw, _ := json.Marshal(cfg); string(raw) != tc.want {
-			t.Fatalf("%s/%s: %s", tc.model, tc.level, raw)
+			t.Fatalf("%s/%s: %s", tc.model.Name, tc.level, raw)
 		}
 	}
-	if _, err := thinkingConfig(ModelGemini3_5Flash, "extreme"); err == nil {
+	if _, err := thinkingConfig(false, "extreme"); err == nil {
 		t.Fatal("an unknown reasoning level should fail")
 	}
 	// 2.x image models do not support thinking: no thinking config by default, and image output is requested.
-	_, config, err := mustNew(Config{Model: "gemini-2.5-flash-image", ImageGeneration: true}).buildRequest(chat.Request{})
+	_, config, err := mustNew(Config{Model: Model{Name: "gemini-2.5-flash-image", Compat: gemini2}, ImageGeneration: true}).buildRequest(chat.Request{})
 	if err != nil || config.ThinkingConfig != nil || len(config.ResponseModalities) != 2 {
 		t.Fatalf("wrong image model config: %+v %v", config, err)
 	}
@@ -223,7 +224,7 @@ func TestToolChoiceConfig(t *testing.T) {
 		{Mode: chat.ToolChoiceNone}:     `{"functionCallingConfig":{"mode":"NONE"}}`,
 		chat.ForceTool("lookup"):        `{"functionCallingConfig":{"allowedFunctionNames":["lookup"],"mode":"ANY"}}`,
 	} {
-		_, config, err := mustNew(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
+		_, config, err := mustNew(Config{Model: flash35}).buildRequest(chat.Request{Options: chat.Options{ToolChoice: choice}, Tools: tools})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +232,7 @@ func TestToolChoiceConfig(t *testing.T) {
 			t.Fatalf("wrong ToolConfig: %s", raw)
 		}
 	}
-	_, config, _ := mustNew(Config{Model: ModelGemini3_5Flash}).buildRequest(chat.Request{Tools: tools})
+	_, config, _ := mustNew(Config{Model: flash35}).buildRequest(chat.Request{Tools: tools})
 	if config.ToolConfig != nil {
 		t.Fatal("ToolConfig should not be sent without ToolChoice")
 	}

@@ -47,7 +47,7 @@ func mustDone(t *testing.T, client *Client, req chat.Request) chat.Message {
 }
 
 func TestIntegrationStreamText(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelClaudeSonnet5_5})
+	client := integrationClient(t, Config{Model: sonnet55})
 	msg := mustDone(t, client, chat.Request{
 		Options:  chat.Options{MaxTokens: 512},
 		Messages: []chat.Message{chat.NewUserTextMessage("请原样输出这个单词，不要输出别的内容：pong")},
@@ -63,20 +63,20 @@ func TestIntegrationStreamText(t *testing.T) {
 // Every model generation should accept the thinking parameters, including with temperature set, thinking off, and the default behavior.
 func TestIntegrationReasoningLevels(t *testing.T) {
 	cases := []struct {
-		model string
+		model Model
 		level chat.ReasoningLevel
 	}{
-		{ModelClaudeSonnet5_5, ""},
-		{ModelClaudeSonnet5_5, chat.ReasoningOff},
-		{ModelClaudeSonnet5_5, chat.ReasoningXHigh},
-		{ModelClaudeHaiku5_5, chat.ReasoningOff},
-		{ModelClaudeHaiku5_5, chat.ReasoningLow},
-		{ModelClaudeSonnet4_6, chat.ReasoningXHigh},
-		{ModelClaudeHaiku4_5, chat.ReasoningOff},
-		{ModelClaudeHaiku4_5, chat.ReasoningMedium},
+		{sonnet55, ""},
+		{sonnet55, chat.ReasoningOff},
+		{sonnet55, chat.ReasoningXHigh},
+		{haiku55, chat.ReasoningOff},
+		{haiku55, chat.ReasoningLow},
+		{sonnet46, chat.ReasoningXHigh},
+		{haiku45, chat.ReasoningOff},
+		{haiku45, chat.ReasoningMedium},
 	}
 	for _, tc := range cases {
-		t.Run(tc.model+"/"+string(tc.level), func(t *testing.T) {
+		t.Run(tc.model.Name+"/"+string(tc.level), func(t *testing.T) {
 			client := integrationClient(t, Config{Model: tc.model})
 			msg := mustDone(t, client, chat.Request{
 				Options:  chat.Options{MaxTokens: 2048, Reasoning: tc.level, Temperature: chat.Float(1)},
@@ -92,8 +92,8 @@ func TestIntegrationReasoningLevels(t *testing.T) {
 // Two rounds of tool calls: the second must send back the first round's thinking blocks and signatures unchanged, or the server rejects it.
 // Covers both adaptive and budget thinking.
 func TestIntegrationThinkingToolReplay(t *testing.T) {
-	for _, model := range []string{ModelClaudeSonnet5_5, ModelClaudeHaiku4_5} {
-		t.Run(model, func(t *testing.T) {
+	for _, model := range []Model{sonnet55, haiku45} {
+		t.Run(model.Name, func(t *testing.T) {
 			client := integrationClient(t, Config{Model: model})
 			req := chat.Request{
 				SystemPrompt: "你是测试助手。需要数据时必须先调用工具，不要编造。",
@@ -136,7 +136,7 @@ func TestIntegrationThinkingToolReplay(t *testing.T) {
 }
 
 func TestIntegrationImageInput(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelClaudeSonnet5_5})
+	client := integrationClient(t, Config{Model: sonnet55})
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for y := range 64 {
 		for x := range 64 {
@@ -161,7 +161,7 @@ func TestIntegrationImageInput(t *testing.T) {
 
 // A second request with the same prefix should hit the cache; with caching off there should be no cache reads or writes.
 func TestIntegrationPromptCache(t *testing.T) {
-	client := integrationClient(t, Config{Model: ModelClaudeHaiku5_5})
+	client := integrationClient(t, Config{Model: haiku55})
 	// Add a timestamp to avoid hitting a cache left by a previous test run.
 	system := "测试运行 " + time.Now().Format(time.RFC3339Nano) + "\n" +
 		strings.Repeat("这是一段用于填充提示词缓存的背景资料，内容本身没有意义。", 300)
@@ -211,8 +211,8 @@ var cityRequest = chat.Request{Messages: []chat.Message{chat.NewUserTextMessage(
 
 // Structured output: native constraints with thinking on, confirming through an HTTP hook that the request body carries the schema.
 func TestIntegrationStructuredOutput(t *testing.T) {
-	for _, model := range []string{ModelClaudeSonnet5_5, ModelClaudeHaiku4_5} {
-		t.Run(model, func(t *testing.T) {
+	for _, model := range []Model{sonnet55, haiku45} {
+		t.Run(model.Name, func(t *testing.T) {
 			var payload string
 			client := integrationClient(t, Config{Model: model, HTTPHooks: chat.HTTPHooks{
 				OnPayload: func(_ context.Context, body []byte) []byte { payload = string(body); return nil },
@@ -230,7 +230,7 @@ func TestIntegrationStructuredOutput(t *testing.T) {
 	}
 }
 
-var toolChoiceModels = []string{ModelClaudeSonnet5_5, ModelClaudeHaiku5_5, ModelClaudeSonnet4_6, ModelClaudeHaiku4_5}
+var toolChoiceModels = []Model{sonnet55, haiku55, sonnet46, haiku45}
 
 // Tool choice constraints: required, none, and a specific tool.
 func TestIntegrationToolChoice(t *testing.T) {
@@ -251,14 +251,14 @@ func TestIntegrationToolChoice(t *testing.T) {
 	for _, model := range toolChoiceModels {
 		for _, tc := range cases {
 			for _, level := range []chat.ReasoningLevel{"", chat.ReasoningHigh} {
-				t.Run(model+"/"+tc.name+"/"+string(level), func(t *testing.T) {
+				t.Run(model.Name+"/"+tc.name+"/"+string(level), func(t *testing.T) {
 					client := integrationClient(t, Config{Model: model})
 					req := chat.Request{
 						Options:  chat.Options{ToolChoice: tc.choice, Reasoning: level},
 						Tools:    tools,
 						Messages: []chat.Message{chat.NewUserTextMessage(tc.prompt)},
 					}
-					if model == ModelClaudeSonnet5_5 && tc.name != "none" {
+					if model.Compat.NoDisableThinking && tc.name != "none" {
 						// Models that cannot turn thinking off do not support forced tool calls and should get a clear local error.
 						_, err := chat.Complete(context.Background(), client, req)
 						if ce := chat.AsError(err); ce == nil || ce.Kind != chat.KindInvalidRequest || !strings.Contains(err.Error(), "does not support forced tool calls") {

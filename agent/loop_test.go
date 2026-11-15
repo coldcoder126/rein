@@ -127,7 +127,7 @@ func TestRunPassesOptionsAndTurnIndex(t *testing.T) {
 		Model: client,
 		Tools: []tool.Tool{stubTool{name: "lookup"}},
 		Options: chat.Options{
-			Model: "m1", MaxTokens: 77, Temperature: chat.Float(0), Reasoning: chat.ReasoningHigh,
+			MaxTokens: 77, Temperature: chat.Float(0), Reasoning: chat.ReasoningHigh,
 			Metadata: map[string]string{"run_id": "run-1", "turn_index": "caller"},
 		},
 	}).Run(context.Background(), Input{
@@ -141,7 +141,7 @@ func TestRunPassesOptionsAndTurnIndex(t *testing.T) {
 		t.Fatalf("expected two model requests: %d", len(requests))
 	}
 	for i, req := range requests {
-		if req.Model != "m1" || req.MaxTokens != 77 || req.Temperature == nil || *req.Temperature != 0 || req.Reasoning != chat.ReasoningHigh {
+		if req.MaxTokens != 77 || req.Temperature == nil || *req.Temperature != 0 || req.Reasoning != chat.ReasoningHigh {
 			t.Fatalf("model options should be passed through unchanged: %+v", req.Options)
 		}
 		if req.Metadata["run_id"] != "run-1" || req.Metadata["turn_index"] != string(rune('0'+i)) {
@@ -484,7 +484,7 @@ func TestHooks(t *testing.T) {
 		Tools:       []tool.Tool{echo, stubTool{name: "danger"}},
 		Middlewares: []Middleware{
 			BeforeModel(func(_ context.Context, turn TurnInfo, req *chat.Request) error {
-				req.Model = "切换后的模型"
+				req.MaxTokens = 99
 				req.Messages = req.Messages[:0]
 				return nil
 			}),
@@ -514,7 +514,7 @@ func TestHooks(t *testing.T) {
 		t.Fatalf("WrapTurn should be able to end the run: %+v %v", result, err)
 	}
 	req := client.Requests()[0]
-	if req.Model != "切换后的模型" || len(req.Messages) != 0 {
+	if req.MaxTokens != 99 || len(req.Messages) != 0 {
 		t.Fatalf("BeforeModel should be able to rewrite the request: %+v", req)
 	}
 	if got := roles(result.Messages); got != "assistant,tool,tool" || req.SystemPrompt != "系统" {

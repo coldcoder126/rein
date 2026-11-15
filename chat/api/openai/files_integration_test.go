@@ -7,5 +7,5 @@ import (
 )
 
 func TestIntegrationFiles(t *testing.T) {
-	chattest.CheckFileInput(t, integrationClient(t, Config{Model: ModelGPT6Luna}))
+	chattest.CheckFileInput(t, integrationClient(t, Config{Model: plain}))
 }

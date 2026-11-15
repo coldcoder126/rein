@@ -18,14 +18,6 @@ import (
 )
 
 const (
-	ModelClaudeOpus5_5   = "claude-opus-5-5"
-	ModelClaudeSonnet5_5 = "claude-sonnet-5-5"
-	ModelClaudeHaiku5_5  = "claude-haiku-5-5"
-	ModelClaudeFable5_1  = "claude-fable-5-1"
-	ModelClaudeOpus4_7   = "claude-opus-4-7"
-	ModelClaudeSonnet4_6 = "claude-sonnet-4-6"
-	ModelClaudeHaiku4_5  = "claude-haiku-4-5"
-
 	providerName = "anthropic"
 
 	// API is the protocol this client speaks, see chat.ModelInfo.API.
@@ -39,24 +31,21 @@ type APIKeyProvider func(ctx context.Context) (string, error)
 type Config struct {
 	// Endpoint is the service the client talks to: the zero value is Anthropic's own, and a compatible
 	// endpoint is described by filling one in.
-	Endpoint       Endpoint
+	Endpoint Endpoint
+	// Model is the model the client talks to; its Name must be set. Another model is another Client.
+	Model          Model
 	APIKey         string
 	APIKeyProvider APIKeyProvider
-	Model          string
-	// MaxInputTokens / MaxOutputTokens of 0 use the endpoint's limits, or the model's built-in specs when it has none;
-	// when a request sets no MaxTokens, MaxOutputTokens is used as max_tokens.
-	MaxInputTokens  int
-	MaxOutputTokens int
-	Timeout         time.Duration
-	MaxRetries      int
-	Headers         map[string]string
-	HTTPClient      *http.Client
+	Timeout        time.Duration
+	MaxRetries     int
+	Headers        map[string]string
+	HTTPClient     *http.Client
 	// ToolSearch picks the server-side tool search used when a request has deferred tools (chat.ToolDef.Deferred):
-	// ToolSearchRegex by default. ToolSearchOff, or a model without tool search, sends every tool up front instead.
+	// ToolSearchRegex by default. ToolSearchOff, or Compat.NoToolSearch, sends every tool up front instead.
 	ToolSearch ToolSearch
 	// PrefixMismatch says what the API does with a replayed thinking block whose conversation changed since it was produced,
-	// on models that bind thinking to the conversation: PrefixMismatchDrop by default. Endpoints that do not accept the
-	// setting say so with Compat.NoThinkingBinding.
+	// on models that bind thinking to the conversation: PrefixMismatchDrop by default. Endpoints and models that do not
+	// accept the setting say so with Compat.NoThinkingBinding.
 	PrefixMismatch PrefixMismatch
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
@@ -98,23 +87,41 @@ const prefixMismatchBeta = "thinking-binding-controls-2026-08-01"
 // Client wraps the Anthropic SDK.
 type Client struct {
 	cfg Config
+	// compat is what the endpoint or the model lacks.
+	compat Compat
+	info   chat.ModelInfo
 }
 
-// New creates an Anthropic chat.Client. It returns an error when cfg.Model is empty.
+// New creates an Anthropic chat.Client. It returns an error when cfg.Model.Name is empty or cfg.Endpoint.Auth is unknown.
 func New(cfg Config) (*Client, error) {
-	if cfg.Model == "" {
-		return nil, errors.New("anthropic: Config.Model must not be empty")
+	if cfg.Model.Name == "" {
+		return nil, errors.New("anthropic: Config.Model.Name must not be empty")
+	}
+	if cfg.Endpoint.Auth != AuthAPIKey && cfg.Endpoint.Auth != AuthBearer {
+		return nil, fmt.Errorf("anthropic: unknown Endpoint.Auth %q", cfg.Endpoint.Auth)
 	}
 	if cfg.Endpoint.Provider == "" {
 		cfg.Endpoint.Provider = providerName
 	}
-	return &Client{cfg: cfg}, nil
+	c := &Client{cfg: cfg, compat: cfg.Endpoint.Compat.merge(cfg.Model.Compat)}
+	c.info = chat.ModelInfo{
+		Provider:         cfg.Endpoint.Provider,
+		API:              API,
+		Model:            cfg.Model.Name,
+		MaxInputTokens:   cfg.Model.MaxInputTokens,
+		MaxOutputTokens:  cfg.Model.MaxOutputTokens,
+		SupportsMedia:    !c.compat.NoMedia,
+		StructuredOutput: !c.compat.NoStructuredOutput,
+		FileScope:        c.fileScope(),
+		ImageLimits:      chat.DefaultImageLimits,
+	}
+	return c, nil
 }
 
 // Stream sends a streaming request. Tool call arguments are assembled inside the provider before they are emitted.
 func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
 	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, c.modelInfo(req))
+		b := chat.NewBuilder(yield, c.info)
 
 		client, err := c.newSDKClient(ctx)
 		if err != nil {
@@ -244,30 +251,10 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 }
 
 // Info returns the model info.
-func (c *Client) Info() chat.ModelInfo {
-	spec := c.spec(c.cfg.Model)
-	return chat.ModelInfo{
-		Provider:         c.cfg.Endpoint.Provider,
-		API:              API,
-		Model:            c.cfg.Model,
-		MaxInputTokens:   spec.maxInput,
-		MaxOutputTokens:  spec.maxOutput,
-		SupportsMedia:    !c.cfg.Endpoint.Compat.NoMedia,
-		StructuredOutput: spec.structuredOutput,
-		FileScope:        c.fileScope(),
-		ImageLimits:      chat.DefaultImageLimits,
-	}
-}
-
-// modelInfo returns the info of the model actually used by this request, for deciding on replay whether it is the same model.
-func (c *Client) modelInfo(req chat.Request) chat.ModelInfo {
-	info := c.Info()
-	info.Model = string(c.resolveModel(req))
-	return info
-}
+func (c *Client) Info() chat.ModelInfo { return c.info }
 
 func (c *Client) newSDKClient(ctx context.Context) (goanthropic.Client, error) {
-	opts := make([]option.RequestOption, 0, 6+len(c.cfg.Headers))
+	opts := make([]option.RequestOption, 0, 7+len(c.cfg.Headers))
 	apiKey := c.cfg.APIKey
 	if c.cfg.APIKeyProvider != nil {
 		key, err := c.cfg.APIKeyProvider(ctx)
@@ -276,7 +263,13 @@ func (c *Client) newSDKClient(ctx context.Context) (goanthropic.Client, error) {
 		}
 		apiKey = key
 	}
-	opts = append(opts, option.WithAPIKey(apiKey))
+	// The SDK also reads credentials from the environment; the header of the other scheme is removed so that a key
+	// found there is never sent along to this endpoint.
+	if c.cfg.Endpoint.Auth == AuthBearer {
+		opts = append(opts, option.WithHeaderDel("X-Api-Key"), option.WithAuthToken(apiKey))
+	} else {
+		opts = append(opts, option.WithHeaderDel("Authorization"), option.WithAPIKey(apiKey))
+	}
 	if c.cfg.Endpoint.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(c.cfg.Endpoint.BaseURL))
 	}
@@ -293,13 +286,6 @@ func (c *Client) newSDKClient(ctx context.Context) (goanthropic.Client, error) {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	return goanthropic.NewClient(opts...), nil
-}
-
-func (c *Client) resolveModel(req chat.Request) goanthropic.Model {
-	if req.Model != "" {
-		return goanthropic.Model(req.Model)
-	}
-	return goanthropic.Model(c.cfg.Model)
 }
 
 func (c *Client) wrapError(ctx context.Context, err error) *chat.Error {

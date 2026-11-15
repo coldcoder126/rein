@@ -21,16 +21,16 @@ const (
 )
 
 func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, error) {
-	if c.cfg.Endpoint.Compat.NoStructuredOutput {
+	if c.compat.NoStructuredOutput {
 		req = chat.WithOutputInstructions(req)
 	}
-	search := !c.cfg.Endpoint.Compat.NoToolSearch && slices.ContainsFunc(req.Tools, func(def chat.ToolDef) bool { return def.Deferred })
-	input, err := convertMessages(chat.NormalizeForModel(req.Messages, c.modelInfo(req)), search)
+	search := !c.compat.NoToolSearch && slices.ContainsFunc(req.Tools, func(def chat.ToolDef) bool { return def.Deferred })
+	input, err := convertMessages(chat.NormalizeForModel(req.Messages, c.info), search)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 	params := responses.ResponseNewParams{
-		Model: shared.ResponsesModel(c.resolveModel(req)),
+		Model: shared.ResponsesModel(c.cfg.Model.Name),
 		Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 	}
 	if strings.TrimSpace(req.SystemPrompt) != "" {
@@ -39,7 +39,7 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = c.cfg.MaxOutputTokens
+		maxTokens = c.cfg.Model.MaxOutputTokens
 	}
 	if maxTokens > 0 {
 		params.MaxOutputTokens = param.NewOpt(int64(max(maxTokens, openaiMinOutputTokens)))
@@ -62,18 +62,21 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 			"type": "json_schema", "name": name, "schema": schema, "strict": true,
 		}}
 	}
-	if !c.cfg.Endpoint.Compat.NoStoreParams {
+	if !c.compat.NoStoreParams {
 		params.Store = param.NewOpt(false)
-		if c.cfg.Reasoning {
+		if !c.compat.NoReasoning {
 			extra["include"] = []string{"reasoning.encrypted_content"}
 		}
 	}
-	if c.cfg.Reasoning {
+	if !c.compat.NoReasoning {
 		reasoning := map[string]any{"summary": "auto"}
 		switch req.Reasoning {
 		case "":
 		case chat.ReasoningOff:
 			reasoning["effort"] = "none"
+		case chat.ReasoningMax:
+			// The Responses API has no effort above xhigh.
+			reasoning["effort"] = string(chat.ReasoningXHigh)
 		default:
 			reasoning["effort"] = string(req.Reasoning)
 		}

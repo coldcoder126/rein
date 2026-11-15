@@ -4,8 +4,35 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 ## Unreleased
 
+### Added
+
+- `chat.ReasoningMax`, the highest effort: `max` on the Anthropic protocol (models without it set `Compat.NoMaxEffort`), `xhigh` on OpenAI's.
+- `anthropic.Endpoint.Auth`: `AuthBearer` sends the key as `Authorization: Bearer` for endpoints that take it that way.
+
 ### Breaking
 
+- **Models are described by the caller.** A client talks to one model, set as a value on `Config.Model`, and the built-in table of Claude models is gone. Only `Name` is required: a model is taken to speak the whole protocol, and `Compat` lists what it lacks. `Compat` is the same type on `Endpoint` (every model of the service) and on `Model` (that model only); a client lacks whatever either lacks.
+
+  | Before | After |
+  |---|---|
+  | `Config{Model: "name"}` | `Config{Model: Model{Name: "name"}}` |
+  | `Config.MaxInputTokens` / `MaxOutputTokens`, `Endpoint.MaxInputTokens` / `MaxOutputTokens` | `Model.MaxInputTokens` / `MaxOutputTokens` |
+  | `anthropic.ModelClaude*`, `openai.ModelGPT6Luna`, `gemini.ModelGemini*` | removed; write the name |
+  | openai `Config{Reasoning: true}` | the default; models that do not reason set `Compat.NoReasoning` |
+  | gemini 2.x detected by name | `Compat{NoThinkingLevel: true, NoMediaInToolResults: true}` |
+
+  What the Anthropic client used to infer from the model name is now declared. Models that were configured by name need these to behave as before:
+
+  | Model | `Compat` |
+  |---|---|
+  | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-fable-*` | `NoDisableThinking` |
+  | `claude-*-4-6`, `claude-*-4-7` | `NoThinkingBinding`, and `NoXHigh` for 4.6 |
+  | `claude-*-4-5` | `NoAdaptiveThinking` |
+  | `claude-3-*` | `NoAdaptiveThinking`, `NoToolSearch` |
+  | other names (compatible endpoints) | `NoAdaptiveThinking`, `NoStructuredOutput`, `NoToolSearch` |
+
+  Limits are no longer guessed either: without `MaxInputTokens` the runner does not compact history, and without `MaxOutputTokens` the Anthropic client sends `anthropic.DefaultMaxTokens` (32000) and the OpenAI client sends no limit.
+- **`chat.Options.Model` is removed.** A request cannot pick another model; build another client and pass it as `agent.Input.Model` or `runner.WithModel`.
 - **No vendor presets.** `anthropic.DeepSeek`, `openai.DeepSeek` and the `ModelDeepSeek*` constants are removed. Fill in an `Endpoint` yourself; the README lists the values for DeepSeek.
 
 ## v0.2.3 (2026-11-11)

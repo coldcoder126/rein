@@ -99,6 +99,8 @@ const (
 	ReasoningHigh   ReasoningLevel = "high"
 	// ReasoningXHigh falls back to high when the model does not support it.
 	ReasoningXHigh ReasoningLevel = "xhigh"
+	// ReasoningMax is the highest effort; it falls back to xhigh when the model does not support it.
+	ReasoningMax ReasoningLevel = "max"
 )
 
 // CacheRetention is how long a prompt cache entry is kept.
@@ -136,9 +138,8 @@ type ToolChoice struct {
 func ForceTool(name string) ToolChoice { return ToolChoice{Mode: ToolChoiceTool, Name: name} }
 
 // Options are the model parameters of one request. The agent passes them through unchanged, so new parameters need no changes in upper layers.
+// The model is not among them: a Client talks to one model, and another model is another Client.
 type Options struct {
-	// Model defaults to the Client's model when empty.
-	Model     string
 	MaxTokens int
 	// Temperature uses the model default when nil; it can be set to 0 explicitly.
 	Temperature *float64

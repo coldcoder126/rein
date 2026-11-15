@@ -79,7 +79,7 @@ type Input struct {
 	FollowUp func(ctx context.Context) ([]chat.Message, error)
 	// Model overrides Agent.Model for this run when set. General sub-agents started by the run use it too;
 	// specialized sub-agents keep their own Model. Agent.Options are passed unchanged, so leave model-specific
-	// options such as Options.Model and MaxTokens unset when runs switch between models.
+	// options such as MaxTokens unset when runs switch between models.
 	Model chat.Client
 	// Middlewares belong to this run only. They sit inside Agent.Middlewares and are not inherited by sub-agents.
 	// Upper layers (such as the runner's history compaction) use them to hook into the run.

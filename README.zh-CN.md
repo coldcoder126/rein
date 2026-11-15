@@ -40,7 +40,7 @@ weather := tool.New("get_weather", "Get the current weather of a city.",
 		return tool.Text(in.City + ": sunny, 22°C"), nil
 	})
 
-model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.ModelClaudeSonnet5_5})
+model, err := anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: anthropic.Model{Name: "claude-sonnet-5-5"}})
 if err != nil {
 	log.Fatal(err)
 }
@@ -85,16 +85,27 @@ fmt.Println(result.Final.TextContent())
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | 通过 stdio 或 Streamable HTTP 使用 MCP 服务器的工具 |
 | `x/...` | 实验性的包，不做稳定性承诺 |
 
-## 兼容接口
+## 模型与兼容接口
 
-其他厂商若使用 Anthropic 或 OpenAI 协议，通过 `Config.Endpoint` 配置：地址、厂商名、模型上限，以及在 `Compat` 中列出它比协议原厂缺少的特性。rein 不内置厂商预设。以 DeepSeek 为例（实测值，以厂商当前文档为准）：
+一个 client 只对应一个模型，由 `Config.Model` 描述；换模型就换一个 client。只有 `Name` 必填：模型默认支持完整协议，缺什么在 `Compat` 中列出。rein 没有内置模型表，所以新模型不需要等新版本。声明 `MaxInputTokens` 后 runner 才会压缩历史，`MaxOutputTokens` 是默认的输出上限。
 
-| 协议 | `BaseURL` | 上限（输入 / 输出） | `Compat` |
-|---|---|---|---|
-| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` |
-| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`、`NoStructuredOutput`、`NoToolSearch` |
+```go
+anthropic.Model{
+	Name:            "claude-sonnet-5-5",
+	MaxInputTokens:  1_000_000,
+	MaxOutputTokens: 128_000,
+	Compat:          anthropic.Compat{NoDisableThinking: true}, // 不能关闭思考
+}
+```
 
-两者都设 `Provider: "deepseek"`。模型不收图片时再加 `NoMedia`。
+其他厂商若使用 Anthropic 或 OpenAI 协议，通过 `Config.Endpoint` 配置：地址、厂商名、密钥的发送方式（`Auth`），以及它自己的 `Compat`，列出该服务上所有模型都缺少的特性。client 缺少的是端点与模型两者的并集。rein 不内置厂商预设。以 DeepSeek 为例（实测值，以厂商当前文档为准）：
+
+| 协议 | `BaseURL` | 上限（输入 / 输出） | 端点 `Compat` | 模型 `Compat` |
+|---|---|---|---|---|
+| `anthropic` | `https://api.deepseek.com/anthropic` | 256,000 / 384,000 | `NoThinkingSignature` | `NoAdaptiveThinking`、`NoStructuredOutput`、`NoToolSearch` |
+| `openai` | `https://api.deepseek.com` | 1,000,000 / 384,000 | `NoStoreParams`、`NoStructuredOutput`、`NoToolSearch` | |
+
+两者都设 `Provider: "deepseek"`。模型不收图片时再加 `NoMedia`；OpenAI 协议下不做推理的模型再加 `NoReasoning`。
 
 ## 示例
 
