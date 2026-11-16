@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/coldcoder126/rein/chat"
@@ -42,7 +43,7 @@ func TestMemoryStoreIsolatesCallers(t *testing.T) {
 	msg := session.UserMessage([]chat.ContentBlock{chat.Text("原文")}, nil)
 	msg.ID = "m1"
 	hidden := session.ContextMessage([]chat.ContentBlock{chat.Text("页面状态")}, session.Message{ID: "m2"})
-	if summary := session.SummaryMessage("摘要", "m1"); summary.Type != session.TypeSummary || summary.Text() != "摘要" || summary.FirstKeptID != "m1" || summary.Visible {
+	if summary := session.SummaryMessage("摘要", session.Compaction{FirstKeptID: "m1"}); summary.Type != session.TypeSummary || summary.Text() != "摘要" || summary.Compaction.FirstKeptID != "m1" || summary.Visible {
 		t.Fatalf("wrong summary message: %+v", summary)
 	}
 	if err := store.AppendMessages(ctx, "s1", msg, hidden); err != nil {
@@ -65,7 +66,7 @@ func TestMemoryStoreIsolatesCallers(t *testing.T) {
 
 // Session message JSON keys use lower snake case like the inner chat.Message; the outer kind is called type so it does not clash with the inner role.
 func TestMessageJSON(t *testing.T) {
-	msg := session.SummaryMessage("摘要", "m1")
+	msg := session.SummaryMessage("摘要", session.Compaction{FirstKeptID: "m1", Reason: session.CompactionAuto, EstimatedTokensBefore: 900})
 	msg.ID, msg.SessionID = "m2", "s1"
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -75,7 +76,7 @@ func TestMessageJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &keys); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"id", "session_id", "type", "chat_message", "visible", "source", "kind", "scope", "first_kept_id", "created_at"} {
+	for _, key := range []string{"id", "session_id", "type", "chat_message", "visible", "source", "kind", "scope", "compaction", "created_at"} {
 		if _, ok := keys[key]; !ok {
 			t.Errorf("missing key %q: %s", key, data)
 		}
@@ -83,9 +84,61 @@ func TestMessageJSON(t *testing.T) {
 	if len(keys) != 10 {
 		t.Errorf("empty details should be omitted: %s", data)
 	}
+	if got := string(keys["compaction"]); got != `{"first_kept_id":"m1","reason":"auto","estimated_tokens_before":900}` {
+		t.Errorf("compaction keys should be snake case, with zero usage omitted: %s", got)
+	}
 	var back session.Message
-	if err := json.Unmarshal(data, &back); err != nil || back.Type != session.TypeSummary || back.FirstKeptID != "m1" || back.Text() != "摘要" {
+	if err := json.Unmarshal(data, &back); err != nil || back.Type != session.TypeSummary || *back.Compaction != *msg.Compaction || back.Text() != "摘要" {
 		t.Fatalf("message read back differs: %+v, %v", back, err)
+	}
+}
+
+func TestCloneCopiesTheCompaction(t *testing.T) {
+	msg := session.SummaryMessage("摘要", session.Compaction{FirstKeptID: "m1"})
+	clone := msg.Clone()
+	clone.Compaction.FirstKeptID = "changed"
+	if msg.Compaction.FirstKeptID != "m1" {
+		t.Fatal("a clone should not share its Compaction with the original")
+	}
+}
+
+func TestCompacted(t *testing.T) {
+	msg := func(id string) session.Message {
+		m := session.UserMessage([]chat.ContentBlock{chat.Text(id)}, nil)
+		m.ID = id
+		return m
+	}
+	summary := func(id, firstKept string) session.Message {
+		m := session.SummaryMessage("摘要", session.Compaction{FirstKeptID: firstKept})
+		m.ID = id
+		return m
+	}
+	ids := func(messages []session.Message) (out []string) {
+		for _, m := range messages {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+	all := []session.Message{msg("m1"), msg("m2")}
+	if got := session.Compacted(all); got != nil {
+		t.Fatalf("nothing is compacted without a summary: %v", ids(got))
+	}
+	// Two compactions: the latest one decides, and the earlier summary is left out because its messages are there.
+	all = append(all, summary("s1", "m2"), msg("m3"), summary("s2", "m3"), msg("m4"))
+	if got := ids(session.Compacted(all)); !slices.Equal(got, []string{"m1", "m2"}) {
+		t.Fatalf("Compacted = %v, want [m1 m2]", got)
+	}
+	if got := ids(session.Tail(all)); !slices.Equal(got, []string{"m3", "s2", "m4"}) {
+		t.Fatalf("Tail = %v, want [m3 s2 m4]", got)
+	}
+	// A kept message that is gone, or a summary without Compaction, starts the tail at the summary.
+	all = append(all, summary("s3", "gone"))
+	if got := ids(session.Compacted(all)); !slices.Equal(got, []string{"m1", "m2", "m3", "m4"}) {
+		t.Fatalf("Compacted = %v, want [m1 m2 m3 m4]", got)
+	}
+	all[len(all)-1].Compaction = nil
+	if got := ids(session.Tail(all)); !slices.Equal(got, []string{"s3"}) {
+		t.Fatalf("Tail = %v, want [s3]", got)
 	}
 }
 

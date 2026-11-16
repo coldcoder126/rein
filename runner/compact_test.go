@@ -101,8 +101,8 @@ func TestCompactionBeforeRun(t *testing.T) {
 	for _, msg := range all {
 		if msg.Type == session.TypeSummary {
 			summaries++
-			if msg.Visible || msg.FirstKeptID == "" {
-				t.Fatalf("the summary message should be hidden and record where the kept part starts: %+v", msg)
+			if c := msg.Compaction; msg.Visible || c == nil || c.FirstKeptID == "" || c.Reason != session.CompactionAuto || c.EstimatedTokensBefore < 900 {
+				t.Fatalf("the summary message should be hidden and record the compaction: %+v", msg)
 			}
 		}
 	}
@@ -168,7 +168,7 @@ func TestCompactionMidRun(t *testing.T) {
 
 func TestCompactionOnOverflowRetriesOnce(t *testing.T) {
 	overflow := chattest.Fail(&chat.Error{Kind: chat.KindContextLength, Message: "prompt is too long"})
-	h, client, _ := compactRunner(t, 1_000_000,
+	h, client, store := compactRunner(t, 1_000_000,
 		sayWithUsage("回答一", 100), sayWithUsage("回答二", 100),
 		overflow, chattest.Say("超限后的摘要"), sayWithUsage("恢复了", 100),
 		overflow, chattest.Say("第二次摘要"), overflow,
@@ -198,6 +198,10 @@ func TestCompactionOnOverflowRetriesOnce(t *testing.T) {
 	if got := requestText(client.Requests()[4]); !strings.Contains(got, "超限后的摘要") || !strings.HasSuffix(got, "问题三") {
 		t.Fatalf("the retried request should use the compacted context: %s", got)
 	}
+	all, _ := store.ListMessages(bg, "c")
+	if i := slices.IndexFunc(all, func(m session.Message) bool { return m.Type == session.TypeSummary }); i < 0 || all[i].Compaction.Reason != session.CompactionOverflow {
+		t.Fatalf("the summary should record that an overflow triggered it: %+v", all)
+	}
 
 	_, err = runSync(h, bg, "c", Text("问题四"))
 	if ce := chat.AsError(err); ce == nil || ce.Kind != chat.KindContextLength || len(client.Requests()) != 8 {
@@ -215,7 +219,8 @@ func TestManualCompaction(t *testing.T) {
 	submit(t, h, "问题一")
 	submit(t, h, "问题二")
 	summary, usage, err := h.Compact(bg, "c", CompactOptions{Instructions: "重点保留数字"})
-	if err != nil || usage.TotalTokens != 42 || summary == nil || summary.Type != session.TypeSummary || summary.Text() != "手动摘要" || summary.FirstKeptID == "" {
+	if err != nil || usage.TotalTokens != 42 || summary == nil || summary.Type != session.TypeSummary || summary.Text() != "手动摘要" ||
+		summary.Compaction == nil || summary.Compaction.FirstKeptID == "" || summary.Compaction.Reason != session.CompactionManual || summary.Compaction.Usage.TotalTokens != 42 {
 		t.Fatalf("should generate and return the stored summary and its usage: %+v %+v %v", summary, usage, err)
 	}
 	// Manual compaction continues the conversation as the next run would see it.
@@ -384,7 +389,7 @@ func TestSummaryCompactorFallsBackToTranscript(t *testing.T) {
 		{ID: "u2", Type: session.TypeUser, ChatMessage: chat.NewUserTextMessage(long("问题二"))},
 	}
 	client := newClient(chattest.Say("纯文本摘要"))
-	in := CompactInput{Messages: messages, Reason: CompactManual, Client: client}
+	in := CompactInput{Messages: messages, Reason: session.CompactionManual, Client: client}
 	result, err := SummaryCompactor{}.Compact(bg, in)
 	if err != nil || result.Summary != "纯文本摘要" || !strings.Contains(client.Requests()[0].Messages[0].TextContent(), "<conversation>") {
 		t.Fatalf("without Continue the summary should come from a transcript: %+v %v", result, err)
@@ -478,7 +483,7 @@ func TestCutIndexAndEffectiveMessages(t *testing.T) {
 		t.Fatalf("the cut should align to a user message: %s", chatLog[cut].ID)
 	}
 
-	summary := session.Message{ID: "s1", Type: session.TypeSummary, FirstKeptID: "a2"}
+	summary := session.Message{ID: "s1", Type: session.TypeSummary, Compaction: &session.Compaction{FirstKeptID: "a2"}}
 	all := append(append([]session.Message{}, messages...), summary, msg("u2", session.TypeUser))
 	out, fresh := effectiveMessages(all)
 	var ids []string

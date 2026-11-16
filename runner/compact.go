@@ -21,8 +21,10 @@ type CompactInput struct {
 	// Tokens is the estimated context usage, and MaxInputTokens the model's context limit.
 	Tokens         int
 	MaxInputTokens int
-	// Reason says how this compaction was triggered.
-	Reason CompactReason
+	// Reason says how this compaction was triggered. With session.CompactionAuto the Compactor decides from the usage whether
+	// to compact; with session.CompactionOverflow and session.CompactionManual it compacts as much as possible regardless of
+	// the estimate, and in a manual compaction MaxInputTokens is 0 when the model declares no context limit.
+	Reason session.CompactionReason
 	// Instructions are the caller's extra requirements for the summary in a manual compaction; may be empty.
 	Instructions string
 	// Client is the model client of the session, which can be used to generate the summary.
@@ -35,19 +37,6 @@ type CompactInput struct {
 	Continue        func(ctx context.Context, extra []chat.Message, opts agent.SideCallOptions) (*chat.Message, error)
 	ContinueThrough string
 }
-
-// CompactReason says how a compaction was triggered.
-type CompactReason string
-
-const (
-	// CompactAuto is the routine check before a run and after each turn; the Compactor decides from the usage whether to compact.
-	CompactAuto CompactReason = "auto"
-	// CompactOverflow means the model already failed because the context was exceeded; compact as much as possible regardless of the estimate.
-	CompactOverflow CompactReason = "overflow"
-	// CompactManual means the caller asked for compaction through Runner.Compact; compact as much as possible regardless of the estimate.
-	// MaxInputTokens is 0 when the model declares no context limit.
-	CompactManual CompactReason = "manual"
-)
 
 // CompactResult describes a compaction: the messages before FirstKeptID are replaced by Summary.
 type CompactResult struct {
@@ -121,7 +110,7 @@ func (c SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compac
 	if keep <= 0 {
 		keep = defaultKeepRatio
 	}
-	force := in.Reason != CompactAuto
+	force := in.Reason != session.CompactionAuto
 	if !force && float64(in.Tokens) < trigger*float64(in.MaxInputTokens) {
 		return nil, nil
 	}
@@ -219,20 +208,7 @@ func transcript(messages []session.Message) string {
 	var sb strings.Builder
 	sb.WriteString("Summarize the following conversation.\n\n<conversation>\n")
 	for _, msg := range messages {
-		var parts []string
-		for _, block := range msg.Content() {
-			switch block.Type {
-			case chat.ContentTypeText:
-				parts = append(parts, block.Text)
-			case chat.ContentTypeMedia:
-				parts = append(parts, "[media]")
-			case chat.ContentTypeToolCall:
-				if block.ToolCall != nil {
-					parts = append(parts, fmt.Sprintf("[tool call %s %s]", block.ToolCall.Name, block.ToolCall.Arguments))
-				}
-			}
-		}
-		text := strings.TrimSpace(strings.Join(parts, "\n"))
+		text := msg.Transcript()
 		if text == "" {
 			continue
 		}
@@ -282,9 +258,13 @@ func effectiveMessages(all []session.Message) (out []session.Message, fresh int)
 		return all, 0
 	}
 	out = append(out, all[last])
+	var firstKept string
+	if c := all[last].Compaction; c != nil {
+		firstKept = c.FirstKeptID
+	}
 	keeping := false
 	for _, msg := range all[:last] {
-		keeping = keeping || msg.ID == all[last].FirstKeptID
+		keeping = keeping || msg.ID == firstKept
 		if keeping && msg.Type != session.TypeSummary {
 			out = append(out, msg)
 		}
@@ -343,7 +323,7 @@ func (r *Runner) Compact(ctx context.Context, sessionID string, opts CompactOpti
 	}
 	var summary *session.Message
 	result, err := r.occupation(ctx, run, r.model(opts.Model), func(st *runState) (err error) {
-		summary, err = st.compact(ctx, CompactManual, opts.Instructions, st.sideCall, false)
+		summary, err = st.compact(ctx, session.CompactionManual, opts.Instructions, st.sideCall, false)
 		return err
 	})
 	return summary, result.Usage, err
@@ -370,10 +350,10 @@ const summaryReserve = 8192
 // The Compactor gets the conversation to summarize through as a side call made with call. latest asks for the conversation up to the
 // newest message, as the coming turn would send it; otherwise, or when that would not fit, it ends at the last assistant message
 // whose model call succeeded, whose input and output fit within the context and whose input is cached.
-func (st *runState) compact(ctx context.Context, reason CompactReason, instructions string, call sideCaller, latest bool) (*session.Message, error) {
+func (st *runState) compact(ctx context.Context, reason session.CompactionReason, instructions string, call sideCaller, latest bool) (*session.Message, error) {
 	r := st.r
 	limit := st.model.Info().MaxInputTokens
-	if r.compactor == nil || (limit <= 0 && reason != CompactManual) {
+	if r.compactor == nil || (limit <= 0 && reason != session.CompactionManual) {
 		return nil, nil
 	}
 	all, err := st.messages(ctx)
@@ -419,7 +399,12 @@ func (st *runState) compact(ctx context.Context, reason CompactReason, instructi
 	if !valid {
 		return nil, fmt.Errorf("runner: Compactor returned an invalid FirstKeptID %q", result.FirstKeptID)
 	}
-	summary := session.SummaryMessage(result.Summary, result.FirstKeptID)
+	summary := session.SummaryMessage(result.Summary, session.Compaction{
+		FirstKeptID:           result.FirstKeptID,
+		Reason:                reason,
+		EstimatedTokensBefore: in.Tokens,
+		Usage:                 result.Usage,
+	})
 	summary.ID = newID("msg")
 	if err := st.save(ctx, summary); err != nil {
 		return nil, err
@@ -440,7 +425,7 @@ func succeeded(msg session.Message) bool {
 // When a turn fails because the context was exceeded it forces a compaction and lets the loop call the model again with the
 // compacted history, recovering at most once per run.
 func (st *runState) wrapTurn(ctx context.Context, info agent.TurnInfo, next agent.TurnNext) (*agent.TurnResult, error) {
-	summary, err := st.compact(ctx, CompactAuto, "", agent.SideCall, info.TurnIndex > 0)
+	summary, err := st.compact(ctx, session.CompactionAuto, "", agent.SideCall, info.TurnIndex > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +444,7 @@ func (st *runState) wrapTurn(ctx context.Context, info agent.TurnInfo, next agen
 	}
 	// The failed assistant message is already stored and is excluded on replay.
 	st.recovered = true
-	if summary, err = st.compact(ctx, CompactOverflow, "", agent.SideCall, false); err != nil || summary == nil {
+	if summary, err = st.compact(ctx, session.CompactionOverflow, "", agent.SideCall, false); err != nil || summary == nil {
 		return result, err
 	}
 	if result.Messages, err = st.buildMessages(ctx); err != nil {

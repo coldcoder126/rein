@@ -7,7 +7,7 @@ rein is an agent framework for Go. A model by itself is just a function from tex
 | `chat` | Model protocol and providers: messages, stream events, errors, structured output, middleware | none |
 | `tool` | Tool interface, execution context, results, typed tools, toolset interface | `chat` |
 | `agent` | The Agent definition (instructions, model, tools) and its decision loop; sub-agents as a tool | `chat`, `tool` |
-| `tool/skill`, `tool/todo`, `tool/shell`, `tool/task` | Built-in tools: skills, checklist, command execution, background task management | `tool` |
+| `tool/skill`, `tool/todo`, `tool/shell`, `tool/task`, `tool/history` | Built-in tools: skills, checklist, command execution, background task management, lookup of compacted history | `tool` (`tool/history` also `session`) |
 | `session` | Persistence model of sessions and messages, store interface, in-memory store | `chat` |
 | `runner` | Runtime: loads history per session, drives the Agent, persistence, queues, compaction, events | `agent`, `session` |
 
@@ -256,9 +256,10 @@ Skills are focused instructions for the model, optionally with resource files. T
 
 - `Message`: a session message, with its role (user, assistant, tool, business context, summary), UI visibility, source, business kind and lifetime. The content is stored once, in `ChatMessage`: assistant and tool messages are the raw messages produced by the model (thinking, tool calls, signatures, usage) and are replayed as is, while other roles only use its content blocks. `Text()` gives the display text and `Content()` the content blocks. `Source` and `Kind` belong entirely to the business layer; the framework does not depend on their values.
 - `Session`: session metadata. A non-empty `ParentID` means the session belongs to a sub-task rather than a conversation the user created, and listings of the user's sessions should usually exclude it.
-- `Store`: four methods (ensure a session exists, get a session, append messages, list messages); `MemoryStore` is the in-memory implementation.
+- `Store`: four methods (ensure a session exists, get a session, append messages, list messages). `MemoryStore` keeps sessions in memory. `FileStore` keeps each session as a JSON metadata file and a JSONL message file in one directory, for local development and single-process use: a complete line is the unit of recovery, so after a crash a partial last line is ignored and cut off by the next append, and file names are the hex of the session ID.
+- A summary message carries `Compaction` (see Compaction under runner); `session.Tail` gives the messages still in the context and `session.Compacted` those the latest compaction replaced.
 - `TailLister`: an optional interface for stores that can read a session from its latest summary (`session.Tail` defines exactly which messages); the runner uses it when present, so a long session is not loaded from its first message. `MemoryStore` implements it.
-- `session/storetest`: conformance checks for a store implementation; its tests call `storetest.Run`.
+- `session/storetest`: conformance checks for a store implementation; its tests call `storetest.Run`. They include a round trip of messages with every field replay relies on, so a serializing store is checked too.
 - `DisplayMessages` filters the messages shown to the user.
 
 ## runner
@@ -316,7 +317,8 @@ Long sessions run into the model's context limit. The Runner decides when and ho
 - It is called automatically before each turn of a run, and when a turn fails because the context was exceeded it forces a compaction and recovers that turn within the same run, calling the model again with the compacted history, at most once per run. So one runner run always calls `Agent.Run` exactly once. `CompactInput.Reason` tells these cases and manual compaction apart. A second overflow, or a failing summary request, ends the run with the error.
 - Manual compaction: the business layer calls `Runner.Compact` when the user asks for it, optionally with extra requirements for the summary and the model to summarize with (usually the session's current model), and gets the summary message and the tokens consumed generating it. It only works while the session is idle, and is a run of its own meanwhile: `run_start`, the stored summary (`message_saved`, `compaction`) and `run_end`. The default strategy then ignores the threshold and cuts by the overflow rules; manual compaction also works when the model declares no context limit.
 - Usage is estimated from the real usage of the latest assistant message after the summary, with the messages after it estimated roughly by bytes. There is no automatic compaction when the model declares no context limit.
-- The summary is stored as a session message with the `summary` role, recording where the kept part starts; history is built as "latest summary + the messages it keeps + the messages after it". The original messages all stay in the store, so a UI can still show the full history.
+- The summary is stored as a session message with the `summary` role, carrying a `Compaction`: where the kept part starts, the trigger, the estimated context before it and the tokens spent on the summary, so compactions can be reviewed from the store. History is built as "latest summary + the messages it keeps + the messages after it". The framework never deletes messages, so a UI can still show the full history; purging old ones is the application's choice.
+- A summary is lossy. `history.Tool(store)` lets the model search the messages the latest compaction replaced (`session.Compacted`) and read one in full; messages still in the context and earlier summaries are left out. It is opt-in, as its definition is part of every request.
 
 ### Events
 
@@ -329,7 +331,7 @@ Every event of a run is kept in memory with the `Run`, and `TextDelta()` / `Thin
 
 Events live in the process that runs them: following a run from another instance, or after a restart, belongs to the business layer.
 
-Not implemented yet: session trees, JSONL storage, session-level key-value state, and pausing and resuming across processes.
+Not implemented yet: session trees, session-level key-value state, and pausing and resuming across processes.
 
 ## Extending rein
 

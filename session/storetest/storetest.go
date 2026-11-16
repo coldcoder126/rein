@@ -3,10 +3,13 @@
 package storetest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/coldcoder126/rein/chat"
 	"github.com/coldcoder126/rein/session"
@@ -18,6 +21,7 @@ func Run(t *testing.T, newStore func(t *testing.T) session.Store) {
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, newStore(t)) })
 	t.Run("Messages", func(t *testing.T) { testMessages(t, newStore(t)) })
 	t.Run("Isolation", func(t *testing.T) { testIsolation(t, newStore(t)) })
+	t.Run("RoundTrip", func(t *testing.T) { testRoundTrip(t, newStore(t)) })
 	t.Run("Tail", func(t *testing.T) {
 		store := newStore(t)
 		if _, ok := store.(session.TailLister); !ok {
@@ -87,7 +91,7 @@ func testMessages(t *testing.T, store session.Store) {
 	if err := store.AppendMessages(ctx, "b", text("x1", "other")); err != nil {
 		t.Fatal(err)
 	}
-	summary := session.SummaryMessage("summary", "m2")
+	summary := session.SummaryMessage("summary", session.Compaction{FirstKeptID: "m2"})
 	summary.ID = "m3"
 	if err := store.AppendMessages(ctx, "a", summary); err != nil {
 		t.Fatal(err)
@@ -99,8 +103,8 @@ func testMessages(t *testing.T, store session.Store) {
 	if messages[0].Text() != "one" || messages[0].Type != session.TypeUser || !messages[0].Visible {
 		t.Fatalf("a message should come back as stored: %+v", messages[0])
 	}
-	if got := messages[2]; got.Type != session.TypeSummary || got.FirstKeptID != "m2" || got.Text() != "summary" {
-		t.Fatalf("a summary should keep its FirstKeptID: %+v", got)
+	if got := messages[2]; got.Type != session.TypeSummary || got.Compaction == nil || got.Compaction.FirstKeptID != "m2" || got.Text() != "summary" {
+		t.Fatalf("a summary should keep its Compaction: %+v", got)
 	}
 }
 
@@ -122,6 +126,56 @@ func testIsolation(t *testing.T, store session.Store) {
 	again, err := store.ListMessages(ctx, "s")
 	if err != nil || len(again) != 1 || again[0].Text() != "original" {
 		t.Fatalf("stored messages should not share memory with the caller's: %+v %v", again, err)
+	}
+}
+
+// testRoundTrip stores messages as the runner writes them, with every field the framework relies on for replay, and
+// expects them back unchanged. Details is left out: a serializing store may return it as JSON values.
+func testRoundTrip(t *testing.T, store session.Store) {
+	ctx := context.Background()
+	if err := store.EnsureSession(ctx, session.Session{ID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 16, 9, 30, 15, 123456789, time.UTC)
+	assistant := session.FromChat(chat.Message{
+		Role: chat.RoleAssistant,
+		Content: []chat.ContentBlock{
+			{Type: chat.ContentTypeThinking, Text: "weighing the options", Signature: "sig-1"},
+			chat.Text("Here is the chart."),
+			{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 0, 1, 2}, Name: "chart.png"},
+			{Type: chat.ContentTypeToolCall, Signature: "sig-2", ToolCall: &chat.ToolCall{ID: "call_1", Name: "lookup", Arguments: json.RawMessage(`{"q":"rein"}`)}},
+			{Type: chat.ContentTypeServerTool, Raw: json.RawMessage(`{"type":"tool_search_result","id":"srv_1"}`)},
+		},
+		Provider: "anthropic", API: "anthropic-messages", Model: "m", ResponseModel: "m-1", ResponseID: "resp_1",
+		Usage:      chat.Usage{Input: 1200, Output: 300, TotalTokens: 1500},
+		StopReason: chat.StopReasonToolUse,
+		CreatedAt:  at,
+	})
+	assistant.ID, assistant.SessionID, assistant.RunID = "a1", "s", "run_1"
+	result := session.FromChat(chat.Message{Role: chat.RoleTool, ToolCallID: "call_1", ToolName: "lookup", IsError: true,
+		Content: []chat.ContentBlock{chat.Text("not found")}, CreatedAt: at})
+	result.ID, result.SessionID, result.RunID = "t1", "s", "run_1"
+	summary := session.SummaryMessage("the gist", session.Compaction{
+		FirstKeptID: "a1", Reason: session.CompactionOverflow, EstimatedTokensBefore: 180_000,
+		Usage: chat.Usage{Input: 900, Output: 100, TotalTokens: 1000},
+	})
+	summary.ID, summary.SessionID, summary.RunID, summary.CreatedAt = "s1", "s", "run_2", at
+	summary.ChatMessage.CreatedAt = at
+
+	want := []session.Message{assistant, result, summary}
+	if err := store.AppendMessages(ctx, "s", want...); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ListMessages(ctx, "s")
+	if err != nil || len(got) != len(want) {
+		t.Fatalf("ListMessages: %s %v", ids(got), err)
+	}
+	for i := range want {
+		w, _ := json.Marshal(want[i])
+		g, _ := json.Marshal(got[i])
+		if !bytes.Equal(w, g) {
+			t.Fatalf("message %s should come back as stored:\nwant %s\ngot  %s", want[i].ID, w, g)
+		}
 	}
 }
 
@@ -149,7 +203,7 @@ func testTail(t *testing.T, store session.Store) {
 		}
 	}
 	summary := func(id, firstKept string) session.Message {
-		msg := session.SummaryMessage("summary", firstKept)
+		msg := session.SummaryMessage("summary", session.Compaction{FirstKeptID: firstKept})
 		msg.ID = id
 		return msg
 	}

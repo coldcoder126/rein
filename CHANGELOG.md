@@ -9,8 +9,15 @@ Breaking changes and notable additions per release. Before v1 any release may br
 - `chat.ReasoningMax`, the highest effort: `max` on the Anthropic protocol (models without it set `Compat.NoMaxEffort`), `xhigh` on OpenAI's.
 - `anthropic.Endpoint.Auth`: `AuthBearer` sends the key as `Authorization: Bearer` for endpoints that take it that way.
 - `gemini.Config.MaxRetries`, as on the other protocols; 0 keeps the SDK's default of not retrying.
+- `session.FileStore`: sessions as JSONL files in a directory, for local development and single-process use.
+- `history.Tool(store)` (package `tool/history`): lets the model search and read the messages compaction replaced with a summary.
+- A summary message records its compaction in `Message.Compaction`: the trigger, the estimated context before it and the tokens spent on the summary.
+- `session.Compacted` returns the messages the latest compaction replaced; `Message.Transcript` renders a message as plain text.
+- `storetest.Run` checks that messages round-trip with every field replay relies on.
 
 ### Breaking
+
+- **Compaction metadata.** `session.Message.FirstKeptID` moved to `Message.Compaction.FirstKeptID`, `session.SummaryMessage` takes a `session.Compaction`, and `runner.CompactReason` with its constants became `session.CompactionReason` (`CompactionAuto`, `CompactionOverflow`, `CompactionManual`). Stored summaries written with `first_kept_id` are not migrated.
 
 - **Models are described by the caller.** A client talks to one model, set as a value on `Config.Model`, and the built-in table of Claude models is gone. Only `Name` is required: a model is taken to speak the whole protocol, and `Compat` lists what it lacks. `Compat` is the same type on `Endpoint` (every model of the service) and on `Model` (that model only); a client lacks whatever either lacks.
 

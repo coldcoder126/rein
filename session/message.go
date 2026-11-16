@@ -21,7 +21,7 @@ const (
 	TypeTool      MessageType = "tool"
 	// TypeContext is business context injected for the model, not something the user said.
 	TypeContext MessageType = "context"
-	// TypeSummary is a summary produced by compaction; it replaces the history before FirstKeptID in the model context.
+	// TypeSummary is a summary produced by compaction; it replaces the history before Compaction.FirstKeptID in the model context.
 	TypeSummary MessageType = "summary"
 )
 
@@ -69,10 +69,34 @@ type Message struct {
 	// Details is structured data attached by the business layer and never sent to the model.
 	Details any `json:"details,omitempty"`
 
-	// FirstKeptID is only used by summary messages: messages before this ID are replaced by the summary and no longer enter the model context.
-	FirstKeptID string    `json:"first_kept_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	// Compaction is set on summary messages only and describes the compaction that wrote them.
+	Compaction *Compaction `json:"compaction,omitempty"`
+	CreatedAt  time.Time   `json:"created_at"`
 }
+
+// Compaction describes one compaction: the messages before FirstKeptID are replaced by the summary carrying it.
+type Compaction struct {
+	// FirstKeptID is the first message kept after the summary; earlier messages no longer enter the model context.
+	FirstKeptID string `json:"first_kept_id"`
+	// Reason says how the compaction was triggered.
+	Reason CompactionReason `json:"reason"`
+	// EstimatedTokensBefore is the estimated context usage before the compaction.
+	EstimatedTokensBefore int `json:"estimated_tokens_before"`
+	// Usage is the tokens spent generating the summary.
+	Usage chat.Usage `json:"usage,omitzero"`
+}
+
+// CompactionReason says how a compaction was triggered.
+type CompactionReason string
+
+const (
+	// CompactionAuto is the routine check before a run and after each turn, which compacts when the context is nearly full.
+	CompactionAuto CompactionReason = "auto"
+	// CompactionOverflow means the model already failed because the context was exceeded.
+	CompactionOverflow CompactionReason = "overflow"
+	// CompactionManual means the caller asked for it, through runner.Runner.Compact.
+	CompactionManual CompactionReason = "manual"
+)
 
 // Content returns the content blocks of the message.
 func (m Message) Content() []chat.ContentBlock { return m.ChatMessage.Content }
@@ -81,6 +105,10 @@ func (m Message) Content() []chat.ContentBlock { return m.ChatMessage.Content }
 func (m Message) Clone() Message {
 	out := m
 	out.ChatMessage = m.ChatMessage.Clone()
+	if m.Compaction != nil {
+		c := *m.Compaction
+		out.Compaction = &c
+	}
 	return out
 }
 
@@ -96,6 +124,25 @@ func (m Message) Text() string {
 		}
 	}
 	return sb.String()
+}
+
+// Transcript returns the message as plain text for a model to read, such as in a summary request: text blocks, media as
+// placeholders and tool calls as [tool call name arguments], without thinking.
+func (m Message) Transcript() string {
+	var parts []string
+	for _, block := range m.ChatMessage.Content {
+		switch block.Type {
+		case chat.ContentTypeText:
+			parts = append(parts, block.Text)
+		case chat.ContentTypeMedia:
+			parts = append(parts, mediaLabel(block))
+		case chat.ContentTypeToolCall:
+			if block.ToolCall != nil {
+				parts = append(parts, "[tool call "+block.ToolCall.Name+" "+string(block.ToolCall.Arguments)+"]")
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 // CloneMessages returns a deep copy of a list of messages.
@@ -120,9 +167,9 @@ func ContextMessage(content []chat.ContentBlock, base Message) Message {
 	return contentMessage(TypeContext, content, base)
 }
 
-// SummaryMessage creates a summary message; firstKeptID is the first message kept after the summary.
-func SummaryMessage(summary, firstKeptID string) Message {
-	return contentMessage(TypeSummary, []chat.ContentBlock{chat.Text(summary)}, Message{Source: SourceSystem, FirstKeptID: firstKeptID})
+// SummaryMessage creates a summary message written by the compaction c.
+func SummaryMessage(summary string, c Compaction) Message {
+	return contentMessage(TypeSummary, []chat.ContentBlock{chat.Text(summary)}, Message{Source: SourceSystem, Compaction: &c})
 }
 
 // contentMessage creates a message not produced by the model from content blocks.

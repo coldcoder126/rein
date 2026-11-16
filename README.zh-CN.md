@@ -82,6 +82,7 @@ fmt.Println(result.Final.TextContent())
 | [`tool/todo`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/todo) | 模型处理多步任务时维护的待办清单 |
 | [`tool/shell`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/shell) | 执行 shell 命令，可前台也可后台，执行环境可替换 |
 | [`tool/task`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/task) | 查看和停止后台任务 |
+| [`tool/history`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/history) | 查找被压缩摘要替换掉的原始消息 |
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | 通过 stdio 或 Streamable HTTP 使用 MCP 服务器的工具 |
 | `x/...` | 实验性的包，不做稳定性承诺 |
 
@@ -126,7 +127,7 @@ rein 负责运行 Agent，外围的产品由你来做。下面这些不包含在
 - 跨进程订阅运行，或进程重启后恢复运行；
 - 权限和审批策略（中间件提供了接入点）；
 - 执行命令的沙箱（实现 `shell.Executor`）；
-- 生产环境的会话存储（实现 `session.Store`；框架只自带内存存储）；
+- 生产环境的会话存储（实现 `session.Store`；框架只自带内存存储和本地 JSONL 文件存储）；
 - MCP 的 resources、prompts、sampling 和 elicitation。
 
 ## 致谢

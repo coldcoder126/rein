@@ -82,6 +82,7 @@ Define tools → put them in an `agent.Agent` → hand the Agent and a store to 
 | [`tool/todo`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/todo) | A checklist the model keeps for multi-step tasks |
 | [`tool/shell`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/shell) | Shell commands, in the foreground or background, through a pluggable executor |
 | [`tool/task`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/task) | Listing and stopping background tasks |
+| [`tool/history`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/history) | Looking up the messages compaction replaced with a summary |
 | [`tool/mcp`](https://pkg.go.dev/github.com/coldcoder126/rein/tool/mcp) | Tools of MCP servers, over stdio or Streamable HTTP |
 | `x/...` | Experimental packages, not covered by any stability promise |
 
@@ -126,7 +127,7 @@ rein runs agents; the product around them is yours. It does not include:
 - following runs across processes, or resuming them after a restart;
 - permission and approval policies (middleware gives you the hooks);
 - sandboxes for executing commands (implement `shell.Executor`);
-- production session stores (implement `session.Store`; only an in-memory store ships);
+- production session stores (implement `session.Store`; an in-memory store and a local JSONL file store ship);
 - MCP resources, prompts, sampling and elicitation.
 
 ## Acknowledgements
