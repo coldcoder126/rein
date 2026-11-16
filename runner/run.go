@@ -339,7 +339,13 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 		}
 	}
 	if len(content) > 0 {
-		initial = append(initial, session.UserMessage(content, options.details))
+		user := session.UserMessage(content, options.details)
+		// The context stored ahead of the input is part of it: forking before the input leaves both out.
+		if len(initial) > 0 {
+			initial[0].ID = newID("msg")
+			user.InputStartID = initial[0].ID
+		}
+		initial = append(initial, user)
 	}
 	if err := st.save(ctx, initial...); err != nil {
 		return err

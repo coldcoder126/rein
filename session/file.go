@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var _ Forker = (*FileStore)(nil)
+
 // maxFileSessionID is the longest session ID a FileStore takes, so the hex file names stay within 255 bytes.
 const maxFileSessionID = 120
 
@@ -54,6 +56,111 @@ func (s *FileStore) EnsureSession(_ context.Context, session Session) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("session: %w", err)
 	}
+	// A message file without metadata is left by a fork that crashed before publishing; it must not become this session's history.
+	if err := os.Remove(base + ".jsonl"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("session: %w", err)
+	}
+	if err := s.publish(base, session); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	return nil
+}
+
+// ForkSession implements Forker. The prefix is copied into a temporary file under the source's lock, which is released
+// before the new session is locked, so two forks never wait on each other; the metadata is published last.
+func (s *FileStore) ForkSession(_ context.Context, dst Session, srcID, cutID string) error {
+	dstBase, err := s.base(dst.ID)
+	if err != nil {
+		return err
+	}
+	srcBase, err := s.existing(srcID)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(s.dir, ".fork-*.tmp")
+	if err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	err = s.copyPrefix(tmp, srcBase, srcID, dst.ID, cutID)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+
+	unlock := s.lock(dst.ID)
+	defer unlock()
+	if _, err := os.Stat(dstBase + ".json"); err == nil {
+		return ErrExists
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("session: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), dstBase+".jsonl"); err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
+	if dst.CreatedAt.IsZero() {
+		dst.CreatedAt = time.Now()
+	}
+	if err := s.publish(dstBase, dst); errors.Is(err, fs.ErrExist) {
+		return ErrExists
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+// copyPrefix writes to w the messages of the session srcID that precede cutID, or all of them when cutID is empty, with
+// SessionID set to dstID.
+func (s *FileStore) copyPrefix(w io.Writer, srcBase, srcID, dstID, cutID string) error {
+	unlock := s.lock(srcID)
+	defer unlock()
+	f, err := os.Open(srcBase + ".jsonl")
+	if errors.Is(err, fs.ErrNotExist) {
+		if cutID != "" {
+			return ErrNotFound
+		}
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	for n := 1; ; n++ {
+		line, err := r.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			if cutID != "" {
+				return ErrNotFound
+			}
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("session: read messages of %q: %w", srcID, err)
+		}
+		var msg Message
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return fmt.Errorf("session: messages of %q, line %d: %w", srcID, n, err)
+		}
+		if cutID != "" && msg.ID == cutID {
+			return nil
+		}
+		msg.SessionID = dstID
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("session: encode message %q: %w", msg.ID, err)
+		}
+		if _, err := w.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("session: write messages: %w", err)
+		}
+	}
+}
+
+// publish writes the metadata of a session, which makes it exist. The file appears under its name only when written in
+// full, so a crash cannot leave a session that looks valid; an error wrapping fs.ErrExist means it already existed.
+func (s *FileStore) publish(base string, session Session) error {
 	if session.CreatedAt.IsZero() {
 		session.CreatedAt = time.Now()
 	}
@@ -61,7 +168,6 @@ func (s *FileStore) EnsureSession(_ context.Context, session Session) error {
 	if err != nil {
 		return fmt.Errorf("session: encode session: %w", err)
 	}
-	// The metadata appears under its name only when written in full, so a crash cannot leave a session that looks valid.
 	tmp, err := os.CreateTemp(s.dir, ".session-*.tmp")
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
@@ -78,7 +184,7 @@ func (s *FileStore) EnsureSession(_ context.Context, session Session) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("session: write session: %w", err)
 	}
-	if err := os.Link(tmp.Name(), base+".json"); err != nil && !errors.Is(err, fs.ErrExist) {
+	if err := os.Link(tmp.Name(), base+".json"); err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
 	return nil

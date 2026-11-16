@@ -69,6 +69,10 @@ type Message struct {
 	// Details is structured data attached by the business layer and never sent to the model.
 	Details any `json:"details,omitempty"`
 
+	// InputStartID is set on a user message stored with persistent business context ahead of it, as one input of
+	// runner.Runner.Start: the ID of the first of those messages, so Fork leaves out the context with the input.
+	InputStartID string `json:"input_start_id,omitempty"`
+
 	// Compaction is set on summary messages only and describes the compaction that wrote them.
 	Compaction *Compaction `json:"compaction,omitempty"`
 	CreatedAt  time.Time   `json:"created_at"`

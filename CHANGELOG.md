@@ -13,6 +13,8 @@ Breaking changes and notable additions per release. Before v1 any release may br
 - `history.Tool(store)` (package `tool/history`): lets the model search and read the messages compaction replaced with a summary.
 - A summary message records its compaction in `Message.Compaction`: the trigger, the estimated context before it and the tokens spent on the summary.
 - `session.Compacted` returns the messages the latest compaction replaced; `Message.Transcript` renders a message as plain text.
+- `session.Fork` branches a session at a user input, for editing a message, through the optional store interface `session.Forker` (implemented by `MemoryStore` and `FileStore`). `Session.ForkOf` / `ForkAt` record the origin, `Message.InputStartID` the business context stored with an input.
+- Message IDs need only be unique within a session; `storetest.Run` checks this and, for a `Forker`, forking.
 - `storetest.Run` checks that messages round-trip with every field replay relies on.
 
 ### Breaking

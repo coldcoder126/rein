@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,5 +149,52 @@ func TestFileStoreLongLines(t *testing.T) {
 	got, err := store.ListMessages(ctx, "s")
 	if err != nil || len(got) != 1 || len(got[0].Content()[0].Data) != 1<<20 {
 		t.Fatalf("a long line should read back whole: %v", err)
+	}
+}
+
+// A fork that crashed after writing its messages but before its metadata leaves a message file without a session;
+// the session created later under that ID must not take those messages.
+func TestFileStoreDropsAMessageFileWithoutMetadata(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	store := openFileStore(t, dir)
+	if err := os.WriteFile(messageFile(dir, "s"), []byte(`{"id":"stale","type":"user"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ListMessages(ctx, "s"); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("messages without metadata are not a session: %v", err)
+	}
+	if err := store.EnsureSession(ctx, session.Session{ID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := listIDs(t, store, "s"); got != "" {
+		t.Fatalf("a new session should not take a leftover message file: %s", got)
+	}
+}
+
+func TestFileStoreForkSurvivesReopening(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	store := openFileStore(t, dir)
+	if err := store.EnsureSession(ctx, session.Session{ID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMessages(ctx, "s", text("m1", "one"), text("m2", "two")); err != nil {
+		t.Fatal(err)
+	}
+	two := text("m2", "two")
+	if err := session.Fork(ctx, store, "s", session.Session{ID: "f"}, &two); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openFileStore(t, dir)
+	if got := listIDs(t, reopened, "f"); got != "m1" {
+		t.Fatalf("the fork should read back after reopening: %s", got)
+	}
+	if s, err := reopened.GetSession(ctx, "f"); err != nil || s.ForkOf != "s" || s.ForkAt != "m2" {
+		t.Fatalf("the fork's metadata should read back: %+v %v", s, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("a fork should leave no temporary file: %s", e.Name())
+		}
 	}
 }

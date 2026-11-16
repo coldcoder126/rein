@@ -2,11 +2,15 @@ package session
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
 
-var _ TailLister = (*MemoryStore)(nil)
+var (
+	_ TailLister = (*MemoryStore)(nil)
+	_ Forker     = (*MemoryStore)(nil)
+)
 
 // MemoryStore is an in-memory Store, suited to tests and lightweight single-process use.
 type MemoryStore struct {
@@ -74,4 +78,34 @@ func (s *MemoryStore) ListTail(_ context.Context, sessionID string) ([]Message, 
 		return nil, ErrNotFound
 	}
 	return CloneMessages(Tail(s.messages[sessionID])), nil
+}
+
+// ForkSession implements Forker.
+func (s *MemoryStore) ForkSession(_ context.Context, dst Session, srcID, cutID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions[srcID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.sessions[dst.ID]; ok {
+		return ErrExists
+	}
+	src := s.messages[srcID]
+	end := len(src)
+	if cutID != "" {
+		end = slices.IndexFunc(src, func(m Message) bool { return m.ID == cutID })
+		if end < 0 {
+			return ErrNotFound
+		}
+	}
+	messages := CloneMessages(src[:end])
+	for i := range messages {
+		messages[i].SessionID = dst.ID
+	}
+	if dst.CreatedAt.IsZero() {
+		dst.CreatedAt = time.Now()
+	}
+	s.sessions[dst.ID] = dst
+	s.messages[dst.ID] = messages
+	return nil
 }
