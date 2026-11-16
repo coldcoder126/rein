@@ -288,3 +288,12 @@ func TestIntegrationToolChoice(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegrationFiles(t *testing.T) {
+	chattest.CheckFileInput(t, integrationClient(t, Config{Model: plain}))
+}
+
+// A real model reads a URL image, an inline PDF, and a PDF in a tool result.
+func TestIntegrationMedia(t *testing.T) {
+	chattest.CheckMediaInput(t, integrationClient(t, Config{Model: plain}))
+}

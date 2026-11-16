@@ -316,3 +316,16 @@ func TestIntegrationToolChoice(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegrationFiles(t *testing.T) {
+	client := integrationClient(t, Config{Model: flash35})
+	if client.Info().FileScope == "" {
+		t.Skip("needs a Gemini API key: Vertex has no Files API")
+	}
+	chattest.CheckFileInput(t, client)
+}
+
+// A real model reads a URL image, an inline PDF, and a PDF in a tool result.
+func TestIntegrationMedia(t *testing.T) {
+	chattest.CheckMediaInput(t, integrationClient(t, Config{Model: flash35}))
+}

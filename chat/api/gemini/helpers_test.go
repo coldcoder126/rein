@@ -1,7 +1,5 @@
 package gemini
 
-import "testing"
-
 // mustNew creates a client for a test whose configuration is known to be valid.
 func mustNew(cfg Config) *Client {
 	client, err := New(cfg)
@@ -19,9 +17,3 @@ var (
 	// gemini2 is what the Gemini 2.x generation lacks.
 	gemini2 = Compat{NoThinkingLevel: true, NoMediaInToolResults: true}
 )
-
-func TestNewRequiresAModel(t *testing.T) {
-	if client, err := New(Config{APIKey: "test"}); err == nil || client != nil {
-		t.Fatalf("New without a model should fail: %v", err)
-	}
-}

@@ -73,14 +73,41 @@ func applyReasoning(params *goanthropic.MessageNewParams, level chat.ReasoningLe
 	return true, nil
 }
 
-// cacheControl returns the cache breakpoint marker, or nil when retention is none.
-func cacheControl(retention chat.CacheRetention) *goanthropic.CacheControlEphemeralParam {
-	if retention == chat.CacheRetentionNone {
-		return nil
+// bindThinking sets thinking.block_binding, so a replayed thinking block whose conversation changed is handled as
+// Config.PrefixMismatch says, and reports whether it did. Thinking left unset is sent as adaptive, which is what the
+// models do anyway, to give the setting a place; disabled thinking cannot carry it, and budget thinking models do not know it.
+func (c *Client) bindThinking(params *goanthropic.MessageNewParams) bool {
+	behavior := c.cfg.PrefixMismatch
+	if behavior == "" {
+		behavior = PrefixMismatchDrop
 	}
-	cc := goanthropic.NewCacheControlEphemeralParam()
-	if retention == chat.CacheRetentionLong {
-		cc.TTL = goanthropic.CacheControlEphemeralTTLTTL1h
+	if c.compat.NoThinkingBinding || c.compat.NoAdaptiveThinking {
+		return false
 	}
-	return &cc
+	t := &params.Thinking
+	if t.OfAdaptive == nil && t.OfEnabled == nil && t.OfDisabled == nil {
+		t.OfAdaptive = &goanthropic.ThinkingConfigAdaptiveParam{}
+	}
+	binding := map[string]any{"block_binding": map[string]any{"prefix_mismatch_behavior": string(behavior)}}
+	switch {
+	case t.OfAdaptive != nil:
+		t.OfAdaptive.SetExtraFields(binding)
+	case t.OfEnabled != nil:
+		t.OfEnabled.SetExtraFields(binding)
+	default:
+		return false
+	}
+	return true
+}
+
+// blockBound reports whether params carry thinking.block_binding, which needs the beta header.
+func blockBound(params goanthropic.MessageNewParams) bool {
+	t := params.Thinking
+	switch {
+	case t.OfAdaptive != nil:
+		return t.OfAdaptive.ExtraFields()["block_binding"] != nil
+	case t.OfEnabled != nil:
+		return t.OfEnabled.ExtraFields()["block_binding"] != nil
+	}
+	return false
 }

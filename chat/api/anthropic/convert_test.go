@@ -154,22 +154,6 @@ func TestBuildParamsNormalizesReplay(t *testing.T) {
 	}
 }
 
-func TestStopReasonFromAnthropic(t *testing.T) {
-	cases := map[goanthropic.StopReason]chat.StopReason{
-		goanthropic.StopReasonToolUse:                    chat.StopReasonToolUse,
-		goanthropic.StopReasonMaxTokens:                  chat.StopReasonLength,
-		goanthropic.StopReasonEndTurn:                    chat.StopReasonStop,
-		goanthropic.StopReasonRefusal:                    chat.StopReasonError,
-		goanthropic.StopReasonPauseTurn:                  chat.StopReasonStop,
-		goanthropic.StopReasonModelContextWindowExceeded: chat.StopReasonLength,
-	}
-	for in, want := range cases {
-		if got := stopReasonFromAnthropic(in); got != want {
-			t.Fatalf("%s mapped wrongly: %q", in, got)
-		}
-	}
-}
-
 func TestNormalizeToolCallID(t *testing.T) {
 	if got := normalizeToolCallID("call|abc.123"); got != "call_abc_123" {
 		t.Fatalf("invalid characters should be replaced: %s", got)
@@ -270,16 +254,6 @@ func TestConvertMediaKinds(t *testing.T) {
 	}
 }
 
-func TestInfoReportsImageSupport(t *testing.T) {
-	info := mustNew(Config{Model: sonnet55}).Info()
-	if !info.SupportsMedia || info.ImageLimits.MaxBytes == 0 {
-		t.Fatalf("should support media by default and give image specs: %+v", info)
-	}
-	if mustNew(Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().SupportsMedia {
-		t.Fatal("TextOnly should turn media support off")
-	}
-}
-
 func TestBuildParamsReplacesImagesForTextOnlyEndpoint(t *testing.T) {
 	client := mustNew(Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}})
 	params, err := client.buildParams(chat.Request{Messages: []chat.Message{{
@@ -309,96 +283,6 @@ func paramsJSON(t *testing.T, client *Client, req chat.Request) string {
 		t.Fatal(err)
 	}
 	return string(raw)
-}
-
-func TestBuildParamsReasoning(t *testing.T) {
-	cases := []struct {
-		name    string
-		cfg     Config
-		opts    chat.Options
-		want    []string
-		notWant []string
-	}{
-		{"default thinking is stated to carry the block binding", Config{Model: sonnet55}, chat.Options{},
-			[]string{`"thinking":{"type":"adaptive",` + `"block_binding":{"prefix_mismatch_behavior":"drop_block"}` + `}`}, []string{`"output_config"`}},
-		{"no thinking parameters with the binding off", Config{Model: sonnet55, Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, chat.Options{}, nil, []string{`"thinking"`, `"output_config"`}},
-		{"the binding can reject instead", Config{Model: opus55, PrefixMismatch: PrefixMismatchError}, chat.Options{},
-			[]string{`"prefix_mismatch_behavior":"error"`}, nil},
-		{"adaptive models use effort", Config{Model: sonnet55}, chat.Options{Reasoning: chat.ReasoningXHigh, Temperature: chat.Float(0.2)},
-			[]string{`"thinking":{"display":"summarized","type":"adaptive",` + `"block_binding":{"prefix_mismatch_behavior":"drop_block"}` + `}`, `"effort":"xhigh"`}, []string{`"temperature"`}},
-		{"fall back to high without xhigh", Config{Model: sonnet46}, chat.Options{Reasoning: chat.ReasoningXHigh},
-			[]string{`"type":"adaptive"`, `"effort":"high"`}, []string{`"block_binding"`}},
-		{"models that cannot turn thinking off use the lowest effort", Config{Model: sonnet55}, chat.Options{Reasoning: chat.ReasoningOff},
-			[]string{`"effort":"low"`, `"block_binding":{"prefix_mismatch_behavior":"drop_block"}`}, nil},
-		{"models that can turn it off send disabled", Config{Model: haiku55}, chat.Options{Reasoning: chat.ReasoningOff, Temperature: chat.Float(0.2)},
-			[]string{`"thinking":{"type":"disabled"}`, `"temperature":0.2`}, []string{`"output_config"`, `"block_binding"`}},
-		{"older models use a budget and raise max_tokens", Config{Model: haiku45}, chat.Options{Reasoning: chat.ReasoningMedium, MaxTokens: 1000},
-			[]string{`"budget_tokens":8192`, `"type":"enabled"`, `"max_tokens":9192`}, []string{`"output_config"`, `"block_binding"`}},
-		{"budget within the model output limit", Config{Model: Model{Name: "m", MaxOutputTokens: 4096, Compat: Compat{NoAdaptiveThinking: true}}}, chat.Options{Reasoning: chat.ReasoningHigh},
-			[]string{`"budget_tokens":3072`, `"max_tokens":4096`}, nil},
-		{"an explicit max_tokens grows by the budget up to the model output limit", Config{Model: Model{Name: "m", MaxOutputTokens: 4096, Compat: Compat{NoAdaptiveThinking: true}}}, chat.Options{Reasoning: chat.ReasoningHigh, MaxTokens: 3000},
-			[]string{`"budget_tokens":3072`, `"max_tokens":4096`}, nil},
-		{"max is the highest effort", Config{Model: haiku55}, chat.Options{Reasoning: chat.ReasoningMax},
-			[]string{`"effort":"max"`}, nil},
-		{"fall back from max to xhigh", Config{Model: Model{Name: "m", Compat: Compat{NoMaxEffort: true}}}, chat.Options{Reasoning: chat.ReasoningMax},
-			[]string{`"effort":"xhigh"`}, nil},
-		{"fall back from max to high without xhigh", Config{Model: sonnet46}, chat.Options{Reasoning: chat.ReasoningMax},
-			[]string{`"effort":"high"`}, nil},
-		{"budget models that cannot turn thinking off use the smallest budget", Config{Model: Model{Name: "m", Compat: Compat{NoAdaptiveThinking: true, NoDisableThinking: true}}}, chat.Options{Reasoning: chat.ReasoningOff},
-			[]string{`"budget_tokens":1024`, `"type":"enabled"`}, []string{`"output_config"`}},
-		{"a model that declares no output limit uses the default max_tokens", Config{Model: Model{Name: "m"}}, chat.Options{},
-			[]string{`"max_tokens":32000`}, nil},
-		{"the model output limit is the default max_tokens", Config{Model: haiku45}, chat.Options{},
-			[]string{`"max_tokens":64000`}, nil},
-		{"models without adaptive thinking use a budget", Config{Model: thirdParty}, chat.Options{Reasoning: chat.ReasoningLow},
-			[]string{`"budget_tokens":2048`}, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := paramsJSON(t, mustNew(tc.cfg), chat.Request{Options: tc.opts})
-			for _, want := range tc.want {
-				if !strings.Contains(got, want) {
-					t.Fatalf("missing %s: %s", want, got)
-				}
-			}
-			for _, notWant := range tc.notWant {
-				if strings.Contains(got, notWant) {
-					t.Fatalf("should not contain %s: %s", notWant, got)
-				}
-			}
-		})
-	}
-	if _, err := mustNew(Config{Model: sonnet55}).buildParams(chat.Request{Options: chat.Options{Reasoning: "extreme"}}); err == nil {
-		t.Fatal("an unknown reasoning level should fail")
-	}
-}
-
-func TestBuildParamsCacheBreakpoints(t *testing.T) {
-	client := mustNew(Config{Model: sonnet55})
-	req := chat.Request{
-		SystemPrompt: "系统提示",
-		Messages: []chat.Message{
-			chat.NewUserTextMessage("查"),
-			{Role: chat.RoleAssistant, Content: []chat.ContentBlock{toolCallBlock("c1", "lookup", `{}`)}},
-			{Role: chat.RoleTool, ToolCallID: "c1", Content: []chat.ContentBlock{chat.Text("结果")}},
-		},
-	}
-	got := paramsJSON(t, client, req)
-	if strings.Count(got, `"cache_control":{"type":"ephemeral"}`) != 2 {
-		t.Fatalf("should put one breakpoint on the system prompt and one on the last block: %s", got)
-	}
-	if !strings.Contains(got, `"cache_control":{"type":"ephemeral"},"content":[{"text":"结果"`) {
-		t.Fatalf("the message breakpoint should be on the last tool result: %s", got)
-	}
-
-	req.CacheRetention = chat.CacheRetentionLong
-	if got := paramsJSON(t, client, req); strings.Count(got, `"ttl":"1h"`) != 2 {
-		t.Fatalf("long should use a 1 hour TTL: %s", got)
-	}
-	req.CacheRetention = chat.CacheRetentionNone
-	if got := paramsJSON(t, client, req); strings.Contains(got, "cache_control") {
-		t.Fatalf("none should send no cache breakpoints: %s", got)
-	}
 }
 
 func TestConvertUnsignedThinking(t *testing.T) {

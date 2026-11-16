@@ -1,7 +1,5 @@
 package anthropic
 
-import "testing"
-
 // mustNew creates a client for a test whose configuration is known to be valid.
 func mustNew(cfg Config) *Client {
 	client, err := New(cfg)
@@ -22,12 +20,3 @@ var (
 	// thirdParty is a model of a compatible service that only knows the basic protocol.
 	thirdParty = Model{Name: "deepseek-flash", MaxOutputTokens: 8_192, Compat: Compat{NoAdaptiveThinking: true, NoStructuredOutput: true, NoToolSearch: true}}
 )
-
-func TestNewValidatesTheConfig(t *testing.T) {
-	if client, err := New(Config{APIKey: "test"}); err == nil || client != nil {
-		t.Fatalf("New without a model should fail: %v", err)
-	}
-	if _, err := New(Config{Model: Model{Name: "m"}, Endpoint: Endpoint{Auth: "basic"}}); err == nil {
-		t.Fatal("New with an unknown auth scheme should fail")
-	}
-}

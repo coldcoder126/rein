@@ -97,60 +97,6 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 	return params, nil
 }
 
-// bindThinking sets thinking.block_binding, so a replayed thinking block whose conversation changed is handled as
-// Config.PrefixMismatch says, and reports whether it did. Thinking left unset is sent as adaptive, which is what the
-// models do anyway, to give the setting a place; disabled thinking cannot carry it, and budget thinking models do not know it.
-func (c *Client) bindThinking(params *goanthropic.MessageNewParams) bool {
-	behavior := c.cfg.PrefixMismatch
-	if behavior == "" {
-		behavior = PrefixMismatchDrop
-	}
-	if c.compat.NoThinkingBinding || c.compat.NoAdaptiveThinking {
-		return false
-	}
-	t := &params.Thinking
-	if t.OfAdaptive == nil && t.OfEnabled == nil && t.OfDisabled == nil {
-		t.OfAdaptive = &goanthropic.ThinkingConfigAdaptiveParam{}
-	}
-	binding := map[string]any{"block_binding": map[string]any{"prefix_mismatch_behavior": string(behavior)}}
-	switch {
-	case t.OfAdaptive != nil:
-		t.OfAdaptive.SetExtraFields(binding)
-	case t.OfEnabled != nil:
-		t.OfEnabled.SetExtraFields(binding)
-	default:
-		return false
-	}
-	return true
-}
-
-// blockBound reports whether params carry thinking.block_binding, which needs the beta header.
-func blockBound(params goanthropic.MessageNewParams) bool {
-	t := params.Thinking
-	switch {
-	case t.OfAdaptive != nil:
-		return t.OfAdaptive.ExtraFields()["block_binding"] != nil
-	case t.OfEnabled != nil:
-		return t.OfEnabled.ExtraFields()["block_binding"] != nil
-	}
-	return false
-}
-
-// markLastBlock puts a cache breakpoint on the last block of the last user message, making the whole history a cacheable prefix.
-// Tool definitions and the system prompt come earlier in the prefix and are covered by the breakpoint on the system prompt.
-func markLastBlock(msgs []goanthropic.MessageParam, cc *goanthropic.CacheControlEphemeralParam) {
-	if cc == nil || len(msgs) == 0 {
-		return
-	}
-	last := msgs[len(msgs)-1]
-	if last.Role != goanthropic.MessageParamRoleUser || len(last.Content) == 0 {
-		return
-	}
-	if slot := last.Content[len(last.Content)-1].GetCacheControl(); slot != nil {
-		*slot = *cc
-	}
-}
-
 // convertMessages converts the history. Server tool records are replayed only when the request has tool search on:
 // without it the API cannot resolve the tools they reference, and every tool is sent up front anyway.
 func convertMessages(messages []chat.Message, unsignedThinking, serverTools bool) ([]goanthropic.MessageParam, error) {
@@ -388,45 +334,6 @@ func convertTools(defs []chat.ToolDef, search ToolSearch) ([]goanthropic.ToolUni
 		out = append(out, searchTool(search))
 	}
 	return out, nil
-}
-
-func usageFromAnthropic(usage goanthropic.Usage) chat.Usage {
-	return chat.Usage{
-		Input:       int(usage.InputTokens),
-		Output:      int(usage.OutputTokens),
-		CacheRead:   int(usage.CacheReadInputTokens),
-		CacheWrite:  int(usage.CacheCreationInputTokens),
-		TotalTokens: int(usage.InputTokens + usage.OutputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens),
-	}
-}
-
-// mergeDeltaUsage updates the usage from message_start with the cumulative values in message_delta, keeping fields the server did not send.
-func mergeDeltaUsage(base goanthropic.Usage, delta goanthropic.MessageDeltaUsage) goanthropic.Usage {
-	if delta.InputTokens > 0 {
-		base.InputTokens = delta.InputTokens
-	}
-	if delta.CacheReadInputTokens > 0 {
-		base.CacheReadInputTokens = delta.CacheReadInputTokens
-	}
-	if delta.CacheCreationInputTokens > 0 {
-		base.CacheCreationInputTokens = delta.CacheCreationInputTokens
-	}
-	base.OutputTokens = delta.OutputTokens
-	return base
-}
-
-func stopReasonFromAnthropic(reason goanthropic.StopReason) chat.StopReason {
-	switch reason {
-	case goanthropic.StopReasonToolUse:
-		return chat.StopReasonToolUse
-	case goanthropic.StopReasonMaxTokens, goanthropic.StopReasonModelContextWindowExceeded:
-		// Output that hits the context window is a truncated but valid reply, just like hitting max_tokens.
-		return chat.StopReasonLength
-	case goanthropic.StopReasonRefusal:
-		return chat.StopReasonError
-	default:
-		return chat.StopReasonStop
-	}
 }
 
 // normalizeToolCallID normalizes tool call IDs produced by other providers into the format Anthropic accepts:

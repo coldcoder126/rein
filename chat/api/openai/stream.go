@@ -1,14 +1,49 @@
 package openai
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/coldcoder126/rein/chat"
 )
+
+// Stream sends a streaming request.
+func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
+	return func(yield func(chat.Event) bool) {
+		b := chat.NewBuilder(yield, c.info)
+
+		client, err := c.newSDKClient(ctx)
+		if err != nil {
+			b.Fail(c.wrapError(ctx, err))
+			return
+		}
+		params, err := c.buildParams(req)
+		if err != nil {
+			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
+			return
+		}
+		stream := client.Responses.NewStreaming(ctx, params)
+		defer stream.Close()
+
+		state := newStreamState(b, c.cfg.Endpoint.Provider)
+		for stream.Next() {
+			if !state.handle(stream.Current()) {
+				return
+			}
+		}
+		if err := stream.Err(); err != nil {
+			b.Fail(c.wrapError(ctx, fmt.Errorf("openai stream: %w", err)))
+			return
+		}
+		state.finish()
+	}
+}
 
 // outputItem holds the fields of a response output item this package needs, parsed from raw JSON to avoid the SDK's union accessors.
 type outputItem struct {

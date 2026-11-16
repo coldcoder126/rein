@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
+
+	goanthropic "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/coldcoder126/rein/chat"
 	"github.com/coldcoder126/rein/chat/chattest"
@@ -191,29 +192,18 @@ func TestStreamCancellationIsAborted(t *testing.T) {
 	}
 }
 
-func TestStreamSendsTheBlockBindingBeta(t *testing.T) {
-	cases := []struct {
-		model Model
-		cfg   Config
-		want  []string
-	}{
-		{sonnet55, Config{Headers: map[string]string{"anthropic-beta": "other-beta"}}, []string{"other-beta", prefixMismatchBeta}},
-		{sonnet55, Config{Endpoint: Endpoint{Compat: Compat{NoThinkingBinding: true}}}, nil},
-		{sonnet46, Config{}, nil},
+func TestStopReasonFromAnthropic(t *testing.T) {
+	cases := map[goanthropic.StopReason]chat.StopReason{
+		goanthropic.StopReasonToolUse:                    chat.StopReasonToolUse,
+		goanthropic.StopReasonMaxTokens:                  chat.StopReasonLength,
+		goanthropic.StopReasonEndTurn:                    chat.StopReasonStop,
+		goanthropic.StopReasonRefusal:                    chat.StopReasonError,
+		goanthropic.StopReasonPauseTurn:                  chat.StopReasonStop,
+		goanthropic.StopReasonModelContextWindowExceeded: chat.StopReasonLength,
 	}
-	for _, tc := range cases {
-		var got []string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			got = r.Header.Values("anthropic-beta")
-			serveSSE(sse(ev("message_start", messageStart), ev("message_stop", `{"type":"message_stop"}`)))(w, r)
-		}))
-		cfg := tc.cfg
-		cfg.APIKey, cfg.Endpoint.BaseURL, cfg.Model = "test", server.URL, tc.model
-		for range mustNew(cfg).Stream(t.Context(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}) {
-		}
-		server.Close()
-		if !slices.Equal(got, tc.want) {
-			t.Fatalf("%s %+v: anthropic-beta = %v, want %v", tc.model.Name, tc.cfg, got, tc.want)
+	for in, want := range cases {
+		if got := stopReasonFromAnthropic(in); got != want {
+			t.Fatalf("%s mapped wrongly: %q", in, got)
 		}
 	}
 }

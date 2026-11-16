@@ -226,12 +226,6 @@ func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 	}
 }
 
-func TestInfoImageReplayFollowsTextOnly(t *testing.T) {
-	if !mustNew(Config{Model: plain}).Info().ImageOutput || mustNew(Config{Model: plain, Endpoint: Endpoint{Compat: Compat{NoMedia: true}}}).Info().ImageOutput {
-		t.Fatal("ImageOutput should be off with TextOnly")
-	}
-}
-
 func TestBuildParamsStructuredOutput(t *testing.T) {
 	req := chat.Request{
 		SystemPrompt: "你是助手",

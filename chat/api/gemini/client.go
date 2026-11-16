@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"net/http"
 	"time"
 
@@ -84,40 +83,6 @@ func New(cfg Config) (*Client, error) {
 
 // Info returns the model info.
 func (c *Client) Info() chat.ModelInfo { return c.info }
-
-// Stream sends a streaming request.
-func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
-	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, c.info)
-
-		client, err := c.newSDKClient(ctx)
-		if err != nil {
-			b.Fail(c.wrapError(ctx, err))
-			return
-		}
-		contents, config, err := c.buildRequest(req)
-		if err != nil {
-			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
-			return
-		}
-
-		// Cancel the request when iteration stops early, releasing the underlying connection immediately.
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		s := &streamState{b: b, last: -1}
-		for resp, err := range client.Models.GenerateContentStream(ctx, c.cfg.Model.Name, contents, config) {
-			if err != nil {
-				b.Fail(c.wrapError(ctx, fmt.Errorf("gemini stream: %w", err)))
-				return
-			}
-			if !s.handle(resp) {
-				return
-			}
-		}
-		s.finish()
-	}
-}
 
 func (c *Client) newSDKClient(ctx context.Context) (*genai.Client, error) {
 	apiKey := c.cfg.APIKey

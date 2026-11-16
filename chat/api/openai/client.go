@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"net/http"
 	"strings"
 	"time"
@@ -80,38 +79,6 @@ func New(cfg Config) (*Client, error) {
 		ImageLimits:      chat.DefaultImageLimits,
 	}
 	return c, nil
-}
-
-// Stream sends a streaming request.
-func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Event] {
-	return func(yield func(chat.Event) bool) {
-		b := chat.NewBuilder(yield, c.info)
-
-		client, err := c.newSDKClient(ctx)
-		if err != nil {
-			b.Fail(c.wrapError(ctx, err))
-			return
-		}
-		params, err := c.buildParams(req)
-		if err != nil {
-			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
-			return
-		}
-		stream := client.Responses.NewStreaming(ctx, params)
-		defer stream.Close()
-
-		state := newStreamState(b, c.cfg.Endpoint.Provider)
-		for stream.Next() {
-			if !state.handle(stream.Current()) {
-				return
-			}
-		}
-		if err := stream.Err(); err != nil {
-			b.Fail(c.wrapError(ctx, fmt.Errorf("openai stream: %w", err)))
-			return
-		}
-		state.finish()
-	}
 }
 
 // Info returns the model info.
