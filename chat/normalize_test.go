@@ -231,10 +231,4 @@ func TestNormalizeKeepsServerToolRecordsForTheSameAPI(t *testing.T) {
 	if len(other[0].Content) != 1 || other[0].Content[0].Type != chat.ContentTypeText {
 		t.Fatalf("another API should not get the record: %+v", other[0].Content)
 	}
-
-	cloned := chat.CloneBlocks([]chat.ContentBlock{record})
-	cloned[0].Raw[2] = 'X'
-	if string(record.Raw) != `{"type":"x"}` {
-		t.Fatal("CloneBlocks should copy Raw")
-	}
 }

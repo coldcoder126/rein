@@ -19,6 +19,7 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 ### Breaking
 
+- **Content bytes are read-only.** `chat.Message.Clone`, `chat.CloneBlocks`, `session.Message.Clone` and `session.CloneMessages` copy the blocks but share the bytes of media `Data`, `Raw` and tool call `Arguments`, which nothing may write once handed on. Do not reuse a buffer after passing it as `Data`. The runner, `chat.Collect` and `MemoryStore` no longer copy media.
 - **Compaction metadata.** `session.Message.FirstKeptID` moved to `Message.Compaction.FirstKeptID`, `session.SummaryMessage` takes a `session.Compaction`, and `runner.CompactReason` with its constants became `session.CompactionReason` (`CompactionAuto`, `CompactionOverflow`, `CompactionManual`). Stored summaries written with `first_kept_id` are not migrated.
 
 - **Models are described by the caller.** A client talks to one model, set as a value on `Config.Model`, and the built-in table of Claude models is gone. Only `Name` is required: a model is taken to speak the whole protocol, and `Compat` lists what it lacks. `Compat` is the same type on `Endpoint` (every model of the service) and on `Model` (that model only); a client lacks whatever either lacks.

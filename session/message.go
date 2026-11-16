@@ -105,7 +105,7 @@ const (
 // Content returns the content blocks of the message.
 func (m Message) Content() []chat.ContentBlock { return m.ChatMessage.Content }
 
-// Clone returns a deep copy of the message.
+// Clone returns a copy of the message that can be changed without affecting m; content bytes are shared, see chat.ContentBlock.
 func (m Message) Clone() Message {
 	out := m
 	out.ChatMessage = m.ChatMessage.Clone()
@@ -149,7 +149,7 @@ func (m Message) Transcript() string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-// CloneMessages returns a deep copy of a list of messages.
+// CloneMessages returns a copy of a list of messages, each made by Message.Clone.
 func CloneMessages(in []Message) []Message {
 	if len(in) == 0 {
 		return nil

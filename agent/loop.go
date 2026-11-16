@@ -326,9 +326,10 @@ func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message
 
 	var final *chat.Message
 	for event := range stream(ctx, req) {
+		// A snapshot later output does not change, safe to keep; Clone shares the content bytes, so one per event stays cheap.
 		var snapshot chat.Message
 		if event.Message != nil {
-			snapshot = snapshotOf(event.Message)
+			snapshot = event.Message.Clone()
 		}
 		out := Event{Type: EventMessageUpdate, TurnIndex: turnIndex, Message: &snapshot}
 		switch event.Type {
@@ -378,21 +379,6 @@ func toolNames(defs []chat.ToolDef) map[string]bool {
 		names[def.Name] = true
 	}
 	return names
-}
-
-// snapshotOf returns a snapshot of the streaming message's current state that later output does not change, so it is safe to keep.
-// Media data and tool call arguments are never modified in place once generated, so the snapshot shares those bytes instead of
-// copying them; otherwise replies with images or large arguments would be copied on every stream event. The snapshot is therefore read-only.
-func snapshotOf(msg *chat.Message) chat.Message {
-	out := *msg
-	out.Content = slices.Clone(msg.Content)
-	for i, block := range out.Content {
-		if block.ToolCall != nil {
-			call := *block.ToolCall
-			out.Content[i].ToolCall = &call
-		}
-	}
-	return out
 }
 
 // finish records the end status and emits agent_end.

@@ -146,3 +146,23 @@ func ids(messages []session.Message) string {
 	}
 	return strings.Join(out, ",")
 }
+
+// MemoryStore copies a forked prefix without its media bytes, which are read-only and shared by both sessions.
+func TestMemoryStoreForkSharesMedia(t *testing.T) {
+	ctx := context.Background()
+	store := session.NewMemoryStore()
+	media := session.UserMessage([]chat.ContentBlock{{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("png")}}, nil)
+	media.ID = "m1"
+	seed(t, store, "s", media)
+	if err := session.Fork(ctx, store, "s", session.Session{ID: "f"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	src, fork := listMessages(t, store, "s"), listMessages(t, store, "f")
+	if &src[0].Content()[0].Data[0] != &fork[0].Content()[0].Data[0] {
+		t.Fatal("the fork should share the media bytes")
+	}
+	fork[0].Content()[0].MIMEType = "image/jpeg"
+	if listMessages(t, store, "f")[0].Content()[0].MIMEType != "image/png" {
+		t.Fatal("changing a listed block should not change the store")
+	}
+}

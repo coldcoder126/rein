@@ -3,6 +3,7 @@ package chat
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 )
@@ -31,6 +32,10 @@ const (
 )
 
 // ContentBlock is a message content block. The blocks of an assistant message keep the exact order returned by the model and are restored unchanged when sent back.
+//
+// What a block points to (the bytes of Data, Raw and ToolCall.Arguments, and *File) is read-only once the block is
+// handed on: the framework shares it between copies instead of copying it, so code that needs other content assigns new
+// values rather than writing into them. A caller passing Data in must not reuse that buffer afterwards.
 type ContentBlock struct {
 	Type ContentType `json:"type"`
 	// Text is the text of a text or thinking block.
@@ -148,26 +153,23 @@ func (m Message) ToolCalls() []ToolCall {
 	return calls
 }
 
-// Clone returns a deep copy of the message.
+// Clone returns a copy of the message whose blocks can be changed without affecting m. The bytes the blocks point to are
+// shared, as they are read-only (see ContentBlock), so a copy costs the same however large its media.
 func (m Message) Clone() Message {
 	out := m
 	out.Content = CloneBlocks(m.Content)
 	return out
 }
 
-// CloneBlocks returns a deep copy of the content blocks.
+// CloneBlocks returns a copy of the content blocks that can be changed without affecting in, sharing the bytes they point to.
 func CloneBlocks(in []ContentBlock) []ContentBlock {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]ContentBlock, len(in))
-	for i, block := range in {
-		out[i] = block
-		out[i].Data = append([]byte(nil), block.Data...)
-		out[i].Raw = append(json.RawMessage(nil), block.Raw...)
+	out := slices.Clone(in)
+	for i, block := range out {
 		if block.ToolCall != nil {
 			call := *block.ToolCall
-			call.Arguments = append(json.RawMessage(nil), block.ToolCall.Arguments...)
 			out[i].ToolCall = &call
 		}
 	}

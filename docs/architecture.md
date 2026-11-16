@@ -27,6 +27,7 @@ Core boundaries:
 
 - `Client.Stream`: the single entry point for model calls, returning `iter.Seq[Event]`; `Complete` / `Collect` consume the stream into the final message.
 - `Message`: an assistant message's `Content` is an ordered list of blocks (text, thinking, tool calls) in the order the model returned them, restored unchanged on replay; it also records the provider (the vendor, such as `deepseek`), the API (the protocol, such as `anthropic-messages`), the model, response ID and usage.
+- Content bytes are read-only: once a block is handed on, the bytes it points to (media `Data`, `Raw`, tool call `Arguments`, `File`) are never written, and code needing other content assigns new values. So `Message.Clone` copies the blocks but shares the bytes, and a message with images costs the same to copy as one without; copies of the bytes happen only where data leaves the process, such as a serializing store. A caller passing `Data` in must not reuse its buffer.
 - `Options`: model parameters (MaxTokens, Temperature and so on) are separate from messages and passed through by the agent unchanged. The model is not one of them: a `Client` talks to one model, and another model is another `Client`. `Reasoning` (off / low / medium / high / xhigh / max) and `CacheRetention` (none / short / long) are provider-neutral and mapped by each provider to its own API.
 - `Options.ToolChoice`: constrains tool calls (auto, none, required, a specific tool); ignored when the request has no tools.
 - `Options.Output`: requires output that follows a JSON Schema; see "Structured output" below.
@@ -159,7 +160,7 @@ The error contract is the same for `Agent.Run`, `agent.RunJSON` and `runner.Run.
 Received through `Input.Emit`:
 
 - Lifecycle: `agent_start`, `agent_end`, `turn_start`, `turn_end`
-- Messages: `message_start`, `message_update`, `message_end`; every event carries a snapshot of the message, so any single event is enough to render the current state. Snapshots are safe to keep but read-only: they share the bytes of media data and tool arguments with the streaming message instead of copying them per event
+- Messages: `message_start`, `message_update`, `message_end`; every event carries a snapshot of the message, so any single event is enough to render the current state. Snapshots are safe to keep and cheap: like every `Message.Clone` they share the content bytes with the streaming message instead of copying them per event
 - Tool execution: `tool_execution_start`, `tool_execution_update`, `tool_execution_end`
 
 ### Middleware
