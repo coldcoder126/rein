@@ -103,15 +103,11 @@ func (s *FileStore) ForkSession(_ context.Context, dst Session, srcID, cutID str
 	if err := os.Rename(tmp.Name(), dstBase+".jsonl"); err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	if dst.CreatedAt.IsZero() {
-		dst.CreatedAt = time.Now()
-	}
-	if err := s.publish(dstBase, dst); errors.Is(err, fs.ErrExist) {
+	err = s.publish(dstBase, dst)
+	if errors.Is(err, fs.ErrExist) {
 		return ErrExists
-	} else if err != nil {
-		return err
 	}
-	return nil
+	return err
 }
 
 // copyPrefix writes to w the messages of the session srcID that precede cutID, or all of them when cutID is empty, with
@@ -119,41 +115,59 @@ func (s *FileStore) ForkSession(_ context.Context, dst Session, srcID, cutID str
 func (s *FileStore) copyPrefix(w io.Writer, srcBase, srcID, dstID, cutID string) error {
 	unlock := s.lock(srcID)
 	defer unlock()
-	f, err := os.Open(srcBase + ".jsonl")
-	if errors.Is(err, fs.ErrNotExist) {
-		if cutID != "" {
-			return ErrNotFound
-		}
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("session: %w", err)
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	for n := 1; ; n++ {
-		line, err := r.ReadBytes('\n')
-		if errors.Is(err, io.EOF) {
-			if cutID != "" {
-				return ErrNotFound
-			}
-			return nil
-		} else if err != nil {
-			return fmt.Errorf("session: read messages of %q: %w", srcID, err)
-		}
-		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
-			return fmt.Errorf("session: messages of %q, line %d: %w", srcID, n, err)
-		}
+	var werr error
+	stopped, err := readMessages(srcBase, srcID, func(msg Message) bool {
 		if cutID != "" && msg.ID == cutID {
-			return nil
+			return false
 		}
 		msg.SessionID = dstID
 		data, err := json.Marshal(msg)
 		if err != nil {
-			return fmt.Errorf("session: encode message %q: %w", msg.ID, err)
+			werr = fmt.Errorf("session: encode message %q: %w", msg.ID, err)
+			return false
 		}
 		if _, err := w.Write(append(data, '\n')); err != nil {
-			return fmt.Errorf("session: write messages: %w", err)
+			werr = fmt.Errorf("session: write messages: %w", err)
+			return false
+		}
+		return true
+	})
+	switch {
+	case err != nil:
+		return err
+	case werr != nil:
+		return werr
+	case cutID != "" && !stopped:
+		return ErrNotFound
+	}
+	return nil
+}
+
+// readMessages passes the messages in a session's message file to yield in order, until yield returns false, and reports
+// whether it did. A missing file holds no messages; a last line without its newline was cut short by a crash and is ignored.
+func readMessages(base, sessionID string, yield func(Message) bool) (stopped bool, err error) {
+	f, err := os.Open(base + ".jsonl")
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("session: %w", err)
+	}
+	defer f.Close()
+	// bufio.Reader rather than bufio.Scanner: a line holding inline media can be far longer than a Scanner's limit.
+	r := bufio.NewReader(f)
+	for n := 1; ; n++ {
+		line, err := r.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		} else if err != nil {
+			return false, fmt.Errorf("session: read messages of %q: %w", sessionID, err)
+		}
+		var msg Message
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return false, fmt.Errorf("session: messages of %q, line %d: %w", sessionID, n, err)
+		}
+		if !yield(msg) {
+			return true, nil
 		}
 	}
 }
@@ -248,30 +262,15 @@ func (s *FileStore) ListMessages(_ context.Context, sessionID string) ([]Message
 	}
 	unlock := s.lock(sessionID)
 	defer unlock()
-	f, err := os.Open(base + ".jsonl")
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("session: %w", err)
-	}
-	defer f.Close()
 	var messages []Message
-	// bufio.Reader rather than bufio.Scanner: a line holding inline media can be far longer than a Scanner's limit.
-	r := bufio.NewReader(f)
-	for n := 1; ; n++ {
-		line, err := r.ReadBytes('\n')
-		if errors.Is(err, io.EOF) {
-			// A last line without its newline was cut short by a crash; it is ignored.
-			return messages, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("session: read messages of %q: %w", sessionID, err)
-		}
-		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
-			return nil, fmt.Errorf("session: messages of %q, line %d: %w", sessionID, n, err)
-		}
+	_, err = readMessages(base, sessionID, func(msg Message) bool {
 		messages = append(messages, msg)
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
+	return messages, nil
 }
 
 // base returns the path of a session's files without their extension.

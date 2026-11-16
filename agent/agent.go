@@ -120,6 +120,7 @@ type ToolInvocation struct {
 	Call             chat.ToolCall
 	Tool             tool.Tool
 	// Args are the arguments about to be passed to the tool, already validated against the schema; they are validated again if a middleware changes them.
+	// They share their bytes with the tool call in the assistant message, so a middleware assigns new arguments rather than writing into them.
 	Args []byte
 }
 

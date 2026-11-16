@@ -41,15 +41,7 @@ func text(id, s string) session.Message {
 
 func listIDs(t *testing.T, store session.Store, sessionID string) string {
 	t.Helper()
-	messages, err := store.ListMessages(context.Background(), sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []string
-	for _, msg := range messages {
-		out = append(out, msg.ID)
-	}
-	return strings.Join(out, ",")
+	return ids(listMessages(t, store, sessionID))
 }
 
 func messageFile(dir, sessionID string) string {

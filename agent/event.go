@@ -34,8 +34,8 @@ type Turn struct {
 type Event struct {
 	Type      EventType
 	TurnIndex int
-	// Message is a snapshot of the assistant or tool result message. It is safe to keep but read-only:
-	// it shares the bytes of media data and tool arguments with the streaming message, so do not modify its content.
+	// Message is a snapshot of the assistant or tool result message, safe to keep. It is a chat.Message.Clone of the
+	// streaming message, so the bytes its blocks point to are shared and read-only, see chat.ContentBlock.
 	Message *chat.Message
 	// AssistantEvent is the model stream event carried by message_update; its Message matches the snapshot above.
 	AssistantEvent *chat.Event

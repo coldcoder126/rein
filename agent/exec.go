@@ -166,7 +166,7 @@ func (l *loop) wrapAndExecute(ctx context.Context, inv *ToolInvocation) (result 
 	if ctx.Err() != nil {
 		return errorResult(abortedCallText)
 	}
-	original := bytes.Clone(inv.Args)
+	original := inv.Args // read-only, so kept without a copy
 	next := func(ctx context.Context, inv *ToolInvocation) *tool.Result {
 		if !bytes.Equal(inv.Args, original) {
 			if err := validateArgs(inv.Tool, inv.Args); err != nil {
