@@ -78,7 +78,7 @@ func (b *userMessageBuilder) flush(out []chat.Message) []chat.Message {
 	}
 	out = append(out, chat.Message{
 		Role:      chat.RoleUser,
-		Content:   chat.CloneBlocks(b.content),
+		Content:   b.content,
 		CreatedAt: b.createdAt,
 	})
 	b.content = nil

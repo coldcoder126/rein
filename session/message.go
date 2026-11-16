@@ -187,7 +187,7 @@ func contentMessage(typ MessageType, content []chat.ContentBlock, base Message) 
 // visible only when it has displayable text; tool results are hidden by default.
 func FromChat(msg chat.Message) Message {
 	out := Message{
-		ChatMessage: msg.Clone(),
+		ChatMessage: msg,
 		Details:     msg.Details,
 		Source:      SourceAgent,
 		Kind:        KindNormal,
