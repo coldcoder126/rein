@@ -11,8 +11,13 @@ Breaking changes and notable additions per release. Before v1 any release may br
 - `Start` waits while a task result is being written to an idle session's history instead of returning `ErrBusy`.
 - `chat.Error.RequestID`: refusals from the Anthropic and OpenAI protocols report the provider's request ID (the response header, else the message or response ID), shown at the end of `Error()`.
 
+### Breaking
+
+- `chat.Usage.Cost` is removed: nothing filled it, since the framework has no price table. Compute cost from the token counts, for example in a `UsageRecorder`.
+
 ### Fixed
 
+- A failed run returns the model's own `*chat.Error`, keeping `Status`, `RetryAfter`, `RequestID` and the underlying error; it used to rebuild one from the kind and message only. A run a middleware ends as failed without a model error no longer panics or returns an empty error.
 - Thinking from another model is dropped on replay instead of being turned into assistant text, which the new model could reject (seen as a refused compaction after switching from Opus to Sonnet).
 
 ## v0.3.0 (2026-11-16)
