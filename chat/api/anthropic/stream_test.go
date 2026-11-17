@@ -139,15 +139,28 @@ func TestStreamTruncatedToolArgsEndsAsLength(t *testing.T) {
 }
 
 func TestStreamRefusalBecomesError(t *testing.T) {
-	client := newTestClient(t, serveSSE(sse(
+	refuse := serveSSE(sse(
 		ev("message_start", messageStart),
 		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":1}}`),
 		ev("message_stop", `{"type":"message_stop"}`),
-	)))
-	events := chattest.Record(client.Stream(context.Background(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}))
-	final := events[len(events)-1]
+	))
+	stream := func(handler http.HandlerFunc) chat.Event {
+		events := chattest.Record(newTestClient(t, handler).Stream(context.Background(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}))
+		return events[len(events)-1]
+	}
+
+	final := stream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("request-id", "req_1")
+		refuse(w, r)
+	})
 	if final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal {
 		t.Fatalf("a refusal should be a non-retryable error: %+v", final)
+	}
+	if !strings.Contains(final.Message.ErrorMessage, "(request_id: req_1)") {
+		t.Fatalf("a refusal should carry the request ID from the headers: %q", final.Message.ErrorMessage)
+	}
+	if final := stream(refuse); !strings.Contains(final.Message.ErrorMessage, "(request_id: msg_1)") {
+		t.Fatalf("without the header a refusal should carry the message ID: %q", final.Message.ErrorMessage)
 	}
 }
 

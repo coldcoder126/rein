@@ -1,13 +1,16 @@
 package openai
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
 	"strings"
 
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/coldcoder126/rein/chat"
@@ -28,10 +31,15 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
 			return
 		}
-		stream := client.Responses.NewStreaming(ctx, params)
+		// The response headers carry the request ID, which refusals report.
+		var resp *http.Response
+		stream := client.Responses.NewStreaming(ctx, params, option.WithResponseInto(&resp))
 		defer stream.Close()
 
 		state := newStreamState(b, c.cfg.Endpoint.Provider)
+		if resp != nil {
+			state.requestID = resp.Header.Get("x-request-id")
+		}
 		for stream.Next() {
 			if !state.handle(stream.Current()) {
 				return
@@ -105,6 +113,9 @@ type streamState struct {
 
 	terminal   bool
 	incomplete string
+
+	// requestID is from the response headers and responseID from the stream; refusals report the first one known.
+	requestID, responseID string
 }
 
 func newStreamState(b *chat.Builder, provider string) *streamState {
@@ -128,6 +139,7 @@ func (s *streamState) itemID(event responses.ResponseStreamEventUnion) string {
 func (s *streamState) handle(event responses.ResponseStreamEventUnion) bool {
 	switch event.Type {
 	case "response.created":
+		s.responseID = event.Response.ID
 		s.b.SetResponse(event.Response.ID, string(event.Response.Model))
 		return s.b.Start()
 
@@ -330,9 +342,11 @@ func (s *streamState) finish() {
 	case !s.terminal:
 		s.b.Fail(&chat.Error{Kind: chat.KindNetwork, Message: "openai: stream ended before response.completed"})
 	case s.refusal.Len() > 0:
-		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: the model refused the request: " + s.refusal.String()})
+		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: the model refused the request: " + s.refusal.String(),
+			RequestID: cmp.Or(s.requestID, s.responseID)})
 	case s.incomplete == "content_filter":
-		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: response blocked by content filtering"})
+		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: response blocked by content filtering",
+			RequestID: cmp.Or(s.requestID, s.responseID)})
 	case s.incomplete == "max_output_tokens":
 		s.b.Done(chat.StopReasonLength)
 	case s.incomplete != "":

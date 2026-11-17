@@ -53,11 +53,20 @@ type Error struct {
 	// RetryAfter is the delay suggested by the server, or 0 when not provided.
 	RetryAfter time.Duration
 	Message    string
+	// RequestID identifies the request at the provider, for errors whose message does not carry it, such as refusals.
+	RequestID string
 	// Err is the underlying original error.
 	Err error
 }
 
 func (e *Error) Error() string {
+	if e.RequestID != "" {
+		return e.text() + " (request_id: " + e.RequestID + ")"
+	}
+	return e.text()
+}
+
+func (e *Error) text() string {
 	switch {
 	case e.Message != "" && e.Err != nil:
 		return fmt.Sprintf("%s: %v", e.Message, e.Err)

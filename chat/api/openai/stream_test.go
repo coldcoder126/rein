@@ -203,9 +203,14 @@ func TestStreamIncompleteAndRefusal(t *testing.T) {
 		t.Fatalf("max_output_tokens should be length: %+v", final)
 	}
 
-	events = run(t, newTestClient(t, Config{Model: plain}, serveEvents(ev("response.created", created), incomplete("content_filter"))))
-	if final := events[len(events)-1]; final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal {
-		t.Fatalf("content_filter should be a refusal: %+v", final)
+	filtered := serveEvents(ev("response.created", created), incomplete("content_filter"))
+	events = run(t, newTestClient(t, Config{Model: plain}, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-request-id", "req_1")
+		filtered(w, r)
+	}))
+	if final := events[len(events)-1]; final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal ||
+		!strings.Contains(final.Message.ErrorMessage, "(request_id: req_1)") {
+		t.Fatalf("content_filter should be a refusal carrying the request ID from the headers: %+v", final)
 	}
 
 	events = run(t, newTestClient(t, Config{Model: plain}, serveEvents(
@@ -214,8 +219,9 @@ func TestStreamIncompleteAndRefusal(t *testing.T) {
 		completed(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"refusal","refusal":"我不能帮助"}]}`),
 	)))
 	final := events[len(events)-1]
-	if final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal || !strings.Contains(final.Message.ErrorMessage, "我不能帮助") {
-		t.Fatalf("a model refusal should be a non-retryable error carrying the reason: %+v", final)
+	if final.Type != chat.EventError || final.Message.ErrorKind != chat.KindRefusal || !strings.Contains(final.Message.ErrorMessage, "我不能帮助") ||
+		!strings.Contains(final.Message.ErrorMessage, "(request_id: resp_1)") {
+		t.Fatalf("a model refusal should be a non-retryable error carrying the reason and, without the header, the response ID: %+v", final)
 	}
 }
 

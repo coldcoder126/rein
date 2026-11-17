@@ -2,6 +2,16 @@
 
 Breaking changes and notable additions per release. Before v1 any release may break the API.
 
+## Unreleased
+
+### Added
+
+- `chat.Error.RequestID`: refusals from the Anthropic and OpenAI protocols report the provider's request ID (the response header, else the message or response ID), shown at the end of `Error()`.
+
+### Fixed
+
+- Thinking from another model is dropped on replay instead of being turned into assistant text, which the new model could reject (seen as a refused compaction after switching from Opus to Sonnet).
+
 ## v0.3.0 (2026-11-16)
 
 ### Added

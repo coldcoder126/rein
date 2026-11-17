@@ -1,10 +1,12 @@
 package anthropic
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
 	"strings"
 
 	goanthropic "github.com/anthropics/anthropic-sdk-go"
@@ -28,7 +30,9 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 			b.Fail(&chat.Error{Kind: chat.KindInvalidRequest, Err: err})
 			return
 		}
-		var opts []option.RequestOption
+		// The response headers carry the request ID, which refusals report.
+		var resp *http.Response
+		opts := []option.RequestOption{option.WithResponseInto(&resp)}
 		if blockBound(params) {
 			opts = append(opts, option.WithHeaderAdd("anthropic-beta", prefixMismatchBeta))
 		}
@@ -43,6 +47,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		var truncated bool
 		// serverRaw is the JSON of the open server tool block, completed with its streamed input at content_block_stop.
 		var serverRaw string
+		var messageID string
 
 		for stream.Next() {
 			event := stream.Current()
@@ -50,6 +55,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 			case "message_start":
 				start := event.AsMessageStart().Message
 				usage = start.Usage
+				messageID = start.ID
 				b.SetResponse(start.ID, string(start.Model))
 				b.SetUsage(usageFromAnthropic(usage))
 				if !b.Start() {
@@ -134,7 +140,8 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 			return
 		}
 		if stopReason == goanthropic.StopReasonRefusal {
-			b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "anthropic: the model refused the request"})
+			b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "anthropic: the model refused the request",
+				RequestID: cmp.Or(header(resp, "request-id"), messageID)})
 			return
 		}
 		reason := stopReasonFromAnthropic(stopReason)
@@ -182,4 +189,12 @@ func stopReasonFromAnthropic(reason goanthropic.StopReason) chat.StopReason {
 	default:
 		return chat.StopReasonStop
 	}
+}
+
+// header returns a response header, or "" when there is no response.
+func header(resp *http.Response, key string) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Header.Get(key)
 }

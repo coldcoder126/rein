@@ -42,7 +42,7 @@ Every provider produces events through `Builder`, which maintains the protocol i
 
 ### Error model
 
-Once the stream is established nothing is thrown: every failure (including cancellation) becomes a terminal `error` event whose message keeps the content generated so far, with stop reason `error` or `aborted`; a tool call still open has incomplete arguments and is dropped. Errors are unified as a classified `*chat.Error` (rate limit, quota, server, network, auth, context overflow, refusal, canceled and so on), decided by HTTP status and headers; only context overflow and mid-stream errors need message matching. A dropped stream is a retryable network error.
+Once the stream is established nothing is thrown: every failure (including cancellation) becomes a terminal `error` event whose message keeps the content generated so far, with stop reason `error` or `aborted`; a tool call still open has incomplete arguments and is dropped. Errors are unified as a classified `*chat.Error` (rate limit, quota, server, network, auth, context overflow, refusal, canceled and so on), decided by HTTP status and headers; refusals carry the provider's request ID in `Error.RequestID`, since their message has none; only context overflow and mid-stream errors need message matching. A dropped stream is a retryable network error.
 
 ### Structured output
 
@@ -74,7 +74,7 @@ Once the stream is established nothing is thrown: every failure (including cance
 
 ### Replay normalization
 
-`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, downgrades thinking blocks to text and normalizes tool call IDs across models (a message counts as the same model only when provider, API and model all match), keeps server tool records only for the API that produced them, and replaces media the model does not accept with a note.
+`NormalizeForModel` runs before every provider request: it drops error/aborted assistant messages, fills in missing tool results and drops orphan results, drops thinking blocks from other models (thinking is private to the model that produced it, and another model may reject it replayed as text) and normalizes tool call IDs across models (a message counts as the same model only when provider, API and model all match), keeps server tool records only for the API that produced them, and replaces media the model does not accept with a note.
 
 ### Deferred tools
 
