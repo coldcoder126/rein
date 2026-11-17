@@ -338,15 +338,16 @@ func (s *streamState) fail(code, message string) bool {
 
 // finish emits the terminal event after the stream was read to the end.
 func (s *streamState) finish() {
+	requestID := cmp.Or(s.requestID, s.responseID)
 	switch {
 	case !s.terminal:
 		s.b.Fail(&chat.Error{Kind: chat.KindNetwork, Message: "openai: stream ended before response.completed"})
 	case s.refusal.Len() > 0:
 		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: the model refused the request: " + s.refusal.String(),
-			RequestID: cmp.Or(s.requestID, s.responseID)})
+			RequestID: requestID})
 	case s.incomplete == "content_filter":
 		s.b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "openai: response blocked by content filtering",
-			RequestID: cmp.Or(s.requestID, s.responseID)})
+			RequestID: requestID})
 	case s.incomplete == "max_output_tokens":
 		s.b.Done(chat.StopReasonLength)
 	case s.incomplete != "":

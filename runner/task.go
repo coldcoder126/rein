@@ -287,17 +287,7 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 	msg := taskNotice(t)
 	sessionID := t.SessionID
 	ctx = context.WithoutCancel(ctx)
-	var wake bool
-	var options runOptions
-	if r.taskWake != nil {
-		var opts []RunOption
-		opts, wake = r.taskWake(ctx, t)
-		for _, opt := range opts {
-			opt(&options)
-		}
-		// Without a model there is nothing to wake: write to history instead.
-		wake = wake && r.model(options.model) != nil
-	}
+	options, wake := r.wakeOptions(ctx, t)
 	for {
 		r.mu.Lock()
 		h := r.active[sessionID]
@@ -331,6 +321,17 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 			<-h.done
 		}
 	}
+}
+
+// wakeOptions asks TaskWake whether the task's result should start a run, and with which options.
+// Without a model there is nothing to wake, and the result is written to history instead.
+func (r *Runner) wakeOptions(ctx context.Context, t tool.Task) (runOptions, bool) {
+	if r.taskWake == nil {
+		return runOptions{}, false
+	}
+	opts, wake := r.taskWake(ctx, t)
+	options := newRunOptions(opts)
+	return options, wake && r.model(options.model) != nil
 }
 
 // notifyDelivered tells waiting tasks that their results have been delivered. The caller must hold Runner.mu.

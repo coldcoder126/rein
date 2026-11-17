@@ -38,6 +38,10 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		}
 		stream := client.Messages.NewStreaming(ctx, params, opts...)
 		defer stream.Close()
+		var requestID string
+		if resp != nil {
+			requestID = resp.Header.Get("request-id")
+		}
 
 		var usage goanthropic.Usage
 		var stopReason goanthropic.StopReason
@@ -141,7 +145,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		}
 		if stopReason == goanthropic.StopReasonRefusal {
 			b.Fail(&chat.Error{Kind: chat.KindRefusal, Message: "anthropic: the model refused the request",
-				RequestID: cmp.Or(header(resp, "request-id"), messageID)})
+				RequestID: cmp.Or(requestID, messageID)})
 			return
 		}
 		reason := stopReasonFromAnthropic(stopReason)
@@ -189,12 +193,4 @@ func stopReasonFromAnthropic(reason goanthropic.StopReason) chat.StopReason {
 	default:
 		return chat.StopReasonStop
 	}
-}
-
-// header returns a response header, or "" when there is no response.
-func header(resp *http.Response, key string) string {
-	if resp == nil {
-		return ""
-	}
-	return resp.Header.Get(key)
 }

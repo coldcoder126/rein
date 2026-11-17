@@ -49,16 +49,29 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// Follow the first run and every run the results wake, until no task is left and the session is idle.
-	// A task leaves the task table only after its result has been delivered, so a woken run is already current by then.
+	// Follow the first run and every run the results wake.
 	for run != nil {
 		result, err := run.Wait(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println(result.Final.Text())
-		for run = r.Current(sessionID); run == nil && len(r.ListTasks(sessionID)) > 0; run = r.Current(sessionID) {
-			time.Sleep(100 * time.Millisecond)
+		run = nextRun(r, sessionID)
+	}
+}
+
+// nextRun waits for the session's next run, returning nil once no task is left and the session is idle.
+// A task leaves the task table only after its result has been delivered, so a run it woke is current by then;
+// the tasks are therefore read before the current run.
+func nextRun(r *runner.Runner, sessionID string) *runner.Run {
+	for {
+		tasks := r.ListTasks(sessionID)
+		if run := r.Current(sessionID); run != nil {
+			return run
 		}
+		if len(tasks) == 0 {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

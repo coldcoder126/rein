@@ -47,10 +47,7 @@ func (r *Runner) Start(ctx context.Context, sessionID string, in Input, opts ...
 			return nil, err
 		}
 	}
-	var options runOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
+	options := newRunOptions(opts)
 	if r.model(options.model) == nil {
 		return nil, errNoModel
 	}

@@ -93,6 +93,14 @@ type runOptions struct {
 	notice *session.Message
 }
 
+func newRunOptions(opts []RunOption) runOptions {
+	var o runOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
 // WithContext injects business context into this run.
 func WithContext(inputs ...ContextInput) RunOption {
 	return func(o *runOptions) { o.context = append(o.context, inputs...) }
