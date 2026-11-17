@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
@@ -94,7 +93,6 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 			return responses.ResponseNewParams{}, fmt.Errorf("openai: unknown ToolChoice %q", req.ToolChoice.Mode)
 		}
 	}
-	maps.Copy(extra, c.cfg.ExtraBody)
 	if len(extra) > 0 {
 		params.SetExtraFields(extra)
 	}

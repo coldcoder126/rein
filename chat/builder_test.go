@@ -225,24 +225,3 @@ func TestBuilderImageAfterFailureKeepsGeneratedImage(t *testing.T) {
 		t.Fatalf("generated images should be kept on failure: %+v", got)
 	}
 }
-
-// KeepFields keeps only the named fields an object holds, skipping nulls, and a later object replaces an earlier field.
-func TestBuilderKeepFields(t *testing.T) {
-	var final chat.Message
-	b := chat.NewBuilder(func(e chat.Event) bool {
-		if e.Type == chat.EventDone {
-			final = e.Message.Clone()
-		}
-		return true
-	}, chat.ModelInfo{})
-	names := []string{"title", "tier", "absent"}
-	b.KeepFields(`{"title":"first","tier":null,"other":1}`, names)
-	b.KeepFields(`{"title":"second"}`, names)
-	b.KeepFields(`not json`, names)
-	b.KeepFields(`{"title":"ignored"}`, nil)
-	b.TextDelta("hi")
-	b.Done(chat.StopReasonStop)
-	if len(final.Extra) != 1 || string(final.Extra["title"]) != `"second"` {
-		t.Fatalf("wrong extra fields: %s", final.Extra)
-	}
-}

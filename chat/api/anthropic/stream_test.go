@@ -92,42 +92,6 @@ func TestStreamThinkingTextAndToolCalls(t *testing.T) {
 	}
 }
 
-// Fields outside the protocol are kept when the client was told to: wherever the service puts them, the later one wins,
-// and nulls and names that were not asked for are left out.
-func TestStreamKeepsDeclaredResponseFields(t *testing.T) {
-	server := httptest.NewServer(serveSSE(sse(
-		ev("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"title":null,"tier":"standard","other":1,"usage":{"input_tokens":1,"output_tokens":1}}}`),
-		ev("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
-		ev("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`),
-		ev("content_block_stop", `{"type":"content_block_stop","index":0}`),
-		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","title":"Greeting"},"x_tools":{"web_search":{"count":1}},"usage":{"output_tokens":2}}`),
-		ev("message_stop", `{"type":"message_stop"}`),
-	)))
-	t.Cleanup(server.Close)
-	client := mustNew(Config{APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}, Model: haiku55,
-		ResponseFields: []string{"title", "tier", "x_tools", "absent"}})
-
-	events := chattest.Record(client.Stream(context.Background(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}))
-	if err := chattest.CheckStream(events); err != nil {
-		t.Fatal(err)
-	}
-	extra := events[len(events)-1].Message.Extra
-	if len(extra) != 3 || string(extra["title"]) != `"Greeting"` || string(extra["tier"]) != `"standard"` ||
-		string(extra["x_tools"]) != `{"web_search":{"count":1}}` {
-		t.Fatalf("wrong extra fields: %s", extra)
-	}
-
-	plain := newTestClient(t, serveSSE(sse(
-		ev("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"title":"t","usage":{"input_tokens":1,"output_tokens":1}}}`),
-		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`),
-		ev("message_stop", `{"type":"message_stop"}`),
-	)))
-	events = chattest.Record(plain.Stream(context.Background(), chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}))
-	if extra := events[len(events)-1].Message.Extra; extra != nil {
-		t.Fatalf("a client that names no fields should keep none: %s", extra)
-	}
-}
-
 func TestStreamTruncatedIsRetryableFailureWithPartialContent(t *testing.T) {
 	client := newTestClient(t, serveSSE(sse(
 		ev("message_start", messageStart),

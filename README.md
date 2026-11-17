@@ -108,10 +108,6 @@ Another vendor speaking the Anthropic or OpenAI protocol is a `Config.Endpoint`:
 
 Set `Provider: "deepseek"` on either. Add `NoMedia` for models that take no images, and on the OpenAI protocol `NoReasoning` for models that do not reason.
 
-Fields a service adds outside the protocol pass through on the Anthropic and OpenAI clients: `Config.ExtraBody` adds top-level fields to every request (DeepSeek's `safety_check` or `title`; one named like a field the client builds replaces it), and `Config.ResponseFields` names the top-level response fields to keep, as raw JSON, in `Message.Extra` (DeepSeek's `title`).
-
-Two things to know: a gateway in front of the protocol's own service is an `Endpoint` with just a `BaseURL`, and needs `Config.FileScope` set to keep using uploaded files, as a custom address reads no file store by default; and a service may ignore what it does not support rather than reject it, as DeepSeek does with a required tool call on the Anthropic protocol (per its docs).
-
 ## Examples
 
 | Example | Shows |

@@ -226,26 +226,6 @@ func TestGeneratedImageIsReplayedAfterToolResultsAsUserImage(t *testing.T) {
 	}
 }
 
-// Extra body fields are added to the request, and one named like a field the client builds replaces it whole.
-func TestBuildParamsExtraBody(t *testing.T) {
-	c := mustNew(Config{Model: luna, ExtraBody: map[string]any{
-		"safety_check": map[string]any{"level": "high"},
-		"reasoning":    map[string]any{"effort": "low"},
-		"model":        "other",
-	}})
-	got := marshal(t, mustParams(t, c, chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("hi")}}))
-	for _, want := range []string{`"safety_check":{"level":"high"}`, `"reasoning":{"effort":"low"}`, `"model":"other"`} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %s: %s", want, got)
-		}
-	}
-	for _, notWant := range []string{`"summary":"auto"`, `"model":"gpt-6-luna"`} {
-		if strings.Contains(got, notWant) {
-			t.Fatalf("should not contain %s: %s", notWant, got)
-		}
-	}
-}
-
 func TestBuildParamsStructuredOutput(t *testing.T) {
 	req := chat.Request{
 		SystemPrompt: "你是助手",

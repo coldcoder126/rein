@@ -46,9 +46,6 @@ func applyReasoning(params *goanthropic.MessageNewParams, level chat.ReasoningLe
 		if level == chat.ReasoningXHigh && compat.NoXHigh {
 			level = chat.ReasoningHigh
 		}
-		if level == chat.ReasoningMedium && compat.NoMediumEffort {
-			level = chat.ReasoningHigh
-		}
 		params.Thinking = goanthropic.ThinkingConfigParamUnion{OfAdaptive: &goanthropic.ThinkingConfigAdaptiveParam{
 			Display: goanthropic.ThinkingConfigAdaptiveDisplaySummarized,
 		}}

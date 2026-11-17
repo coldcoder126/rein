@@ -108,10 +108,6 @@ anthropic.Model{
 
 两者都设 `Provider: "deepseek"`。模型不收图片时再加 `NoMedia`；OpenAI 协议下不做推理的模型再加 `NoReasoning`。
 
-厂商在协议之外加的字段，Anthropic 和 OpenAI 两个 client 都可以透传：`Config.ExtraBody` 给每次请求加顶层字段（如 DeepSeek 的 `safety_check`、`title`；与 client 自己生成的字段同名时会替换它），`Config.ResponseFields` 列出要保留的响应顶层字段，它们以原始 JSON 存进 `Message.Extra`（如 DeepSeek 的 `title`）。
-
-另有两点：通过网关访问协议自家的服务时，`Endpoint` 只需填 `BaseURL`，但要设置 `Config.FileScope` 才能继续使用已上传的文件，因为自定义地址默认不读任何文件存储；服务对不支持的特性可能是忽略而不是报错，比如 DeepSeek 在 Anthropic 协议下会把“必须调用工具”当成自动（据其文档）。
-
 ## 示例
 
 | 示例 | 演示内容 |

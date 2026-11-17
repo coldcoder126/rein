@@ -44,12 +44,6 @@ type Config struct {
 	// on models that bind thinking to the conversation: PrefixMismatchDrop by default. Endpoints and models that do not
 	// accept the setting say so with Compat.NoThinkingBinding.
 	PrefixMismatch PrefixMismatch
-	// ExtraBody are top-level fields added to the body of every Messages request, for what a service accepts outside
-	// the protocol. A field named like one the client builds replaces it whole.
-	ExtraBody map[string]any
-	// ResponseFields names top-level fields of the response message that are outside the protocol and worth keeping;
-	// those the service sends are kept as raw JSON in chat.Message.Extra.
-	ResponseFields []string
 	// FileScope names the Files API store this key reads, see chat.FileRef.Scope. It defaults to "anthropic" for the
 	// official endpoint and to none for a custom BaseURL; set it per workspace when keys of several workspaces are in use.
 	FileScope string

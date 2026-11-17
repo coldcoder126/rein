@@ -10,9 +10,6 @@ Breaking changes and notable additions per release. Before v1 any release may br
 - `Runner.DeliverTaskResult` sends the result of a task the Runner is not running, such as one a restart cut off, back to its session like a task that just ended.
 - `Start` waits while a task result is being written to an idle session's history instead of returning `ErrBusy`.
 - `Runner.Shutdown` for planned exits: new work gets `ErrClosed`, runs in progress are aborted (keeping their output and queued messages), background tasks are stopped with the reason in `Task.Error` and delivered without waking, and `Subscribe` calls end once everything is stored.
-- `Config.ExtraBody` on the Anthropic and OpenAI clients adds top-level fields to every request, for what a service accepts outside the protocol (DeepSeek's `safety_check` and `title`); a field named like one the client builds replaces it.
-- `Config.ResponseFields` on the same clients names top-level response fields to keep, as raw JSON, in the new `chat.Message.Extra` (DeepSeek's `title`); `chat.Builder.KeepFields` is what providers call.
-- `anthropic.Compat.NoMediumEffort`: models whose effort has no `medium` get `high` instead.
 - `chat.Error.RequestID`: refusals from the Anthropic and OpenAI protocols report the provider's request ID (the response header, else the message or response ID), shown at the end of `Error()`.
 
 ### Breaking

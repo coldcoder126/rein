@@ -3,7 +3,6 @@ package chat
 
 import (
 	"encoding/json"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -119,9 +118,6 @@ type Message struct {
 	StopReason    StopReason `json:"stop_reason,omitempty"`
 	ErrorMessage  string     `json:"error_message,omitempty"`
 	ErrorKind     ErrorKind  `json:"error_kind,omitempty"`
-	// Extra holds top-level fields of the provider's response that are outside the protocol, by name and as raw JSON,
-	// for the names the client was told to keep (see each provider's Config.ResponseFields). It is never sent to a model.
-	Extra map[string]json.RawMessage `json:"extra,omitempty"`
 
 	CreatedAt time.Time `json:"created_at,omitzero"`
 }
@@ -162,7 +158,6 @@ func (m Message) ToolCalls() []ToolCall {
 func (m Message) Clone() Message {
 	out := m
 	out.Content = CloneBlocks(m.Content)
-	out.Extra = maps.Clone(m.Extra)
 	return out
 }
 
