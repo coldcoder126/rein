@@ -663,6 +663,39 @@ func TestMiddlewareOrder(t *testing.T) {
 	}
 }
 
+func TestFailedRunReturnsTheModelError(t *testing.T) {
+	original := &chat.Error{Kind: chat.KindRateLimit, Status: 429, RetryAfter: 2 * time.Second, RequestID: "req_1", Message: "限流"}
+	client := chattest.NewClient(func(_ context.Context, b *chat.Builder) { b.Fail(original) })
+	result, err := (&Agent{Model: client}).Run(context.Background(), Input{Messages: user("问题")})
+	var ce *chat.Error
+	if !errors.As(err, &ce) || ce.Status != 429 || ce.RetryAfter != 2*time.Second || ce.RequestID != "req_1" || result.Status != StatusFailed {
+		t.Fatalf("a failed run should return the model's error with its status, retry delay and request ID: %#v", err)
+	}
+}
+
+func TestMiddlewareFailureWithoutModelError(t *testing.T) {
+	fail := func(callNext bool) Middleware {
+		return Middleware{WrapTurn: func(ctx context.Context, turn TurnInfo, next TurnNext) (*TurnResult, error) {
+			if !callNext {
+				return &TurnResult{Status: StatusFailed}, nil
+			}
+			result, err := next(ctx)
+			if err == nil {
+				result.Status = StatusFailed
+			}
+			return result, err
+		}}
+	}
+	for _, callNext := range []bool{false, true} {
+		a := &Agent{Model: chattest.NewClient(chattest.Say("好")), Middlewares: []Middleware{fail(callNext)}}
+		result, err := a.Run(context.Background(), Input{Messages: user("问题")})
+		var ce *chat.Error
+		if !errors.As(err, &ce) || ce.Kind != chat.KindUnknown || !strings.Contains(ce.Message, "middleware") || result.Status != StatusFailed {
+			t.Fatalf("a run a middleware failed (next called: %v) should say so, not panic or return an empty error: %#v", callNext, err)
+		}
+	}
+}
+
 func TestWrapTurnRecoversFailedTurn(t *testing.T) {
 	client := chattest.NewClient(
 		chattest.Fail(&chat.Error{Kind: chat.KindContextLength, Message: "prompt is too long"}),

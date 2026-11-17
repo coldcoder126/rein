@@ -35,7 +35,7 @@ func (a *Agent) Run(ctx context.Context, in Input) (*Result, error) {
 		if err := l.run(ctx); err != nil {
 			return l.result, err
 		}
-		return l.result, statusError(ctx, l.result)
+		return l.result, l.statusError(ctx)
 	})(ctx)
 }
 
@@ -73,11 +73,15 @@ type loopKey struct{}
 // depthKey is the ctx key of the sub-agent nesting depth.
 type depthKey struct{}
 
-// statusError turns an end status other than normal completion into an error.
-func statusError(ctx context.Context, result *Result) error {
-	switch result.Status {
+// statusError turns an end status other than normal completion into an error. A failure returns the model's own error,
+// with its status, retry delay and request ID; a run a middleware ended as failed without a model error gets an error saying so.
+func (l *loop) statusError(ctx context.Context) error {
+	switch l.result.Status {
 	case StatusFailed:
-		return &chat.Error{Kind: result.Final.ErrorKind, Message: result.Final.ErrorMessage}
+		if l.modelErr != nil {
+			return l.modelErr
+		}
+		return &chat.Error{Kind: chat.KindUnknown, Message: "agent: a middleware ended the run as failed without a model error"}
 	case StatusAborted:
 		if err := ctx.Err(); err != nil {
 			return err
@@ -117,6 +121,8 @@ type loop struct {
 
 	result *Result
 	start  time.Time
+	// modelErr is the error of the latest model call, nil when it succeeded.
+	modelErr *chat.Error
 }
 
 // resolve settles the system prompt and tool list of the run at its start; they do not change afterwards.
@@ -325,6 +331,7 @@ func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message
 	})
 
 	var final *chat.Message
+	l.modelErr = nil
 	for event := range stream(ctx, req) {
 		// A snapshot later output does not change, safe to keep; Clone shares the content bytes, so one per event stays cheap.
 		var snapshot chat.Message
@@ -338,6 +345,9 @@ func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message
 		case chat.EventDone, chat.EventError:
 			out.Type = EventMessageEnd
 			final = &snapshot
+			if event.Type == chat.EventError {
+				l.modelErr = errorOf(event, snapshot)
+			}
 		default:
 			assistantEvent := event
 			assistantEvent.Message = &snapshot
@@ -351,6 +361,14 @@ func (l *loop) streamAssistant(ctx context.Context, info TurnInfo) (chat.Message
 		return chat.Message{}, nil, errors.New("agent: model stream ended before a terminal event")
 	}
 	return *final, offered, nil
+}
+
+// errorOf returns the typed error of an error event, rebuilt from the message when a middleware's event carries none.
+func errorOf(event chat.Event, msg chat.Message) *chat.Error {
+	if event.Err != nil {
+		return chat.AsError(event.Err)
+	}
+	return &chat.Error{Kind: msg.ErrorKind, Message: msg.ErrorMessage}
 }
 
 // request builds the model request of a turn from the resolved system prompt and tools; turns and side calls share it,
