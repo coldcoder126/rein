@@ -334,7 +334,8 @@ func withoutSnapshot(event Event) Event {
 
 func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, options runOptions) error {
 	r := st.r
-	if err := r.store.EnsureSession(ctx, session.Session{ID: st.info.SessionID, ParentID: st.info.ParentSessionID, CreatedAt: time.Now()}); err != nil {
+	// Like save, creating the session ignores the run's cancellation: a run aborted at once still stores its input.
+	if err := r.store.EnsureSession(context.WithoutCancel(ctx), session.Session{ID: st.info.SessionID, ParentID: st.info.ParentSessionID, CreatedAt: time.Now()}); err != nil {
 		return err
 	}
 	var initial []session.Message

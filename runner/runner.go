@@ -13,6 +13,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -321,15 +323,14 @@ func (r *Runner) finishShutdown() {
 	r.pending.Wait()
 	for {
 		r.mu.Lock()
-		var run *Run
-		for _, run = range r.active {
-			break
-		}
+		runs := slices.Collect(maps.Values(r.active))
 		r.mu.Unlock()
-		if run == nil {
+		if len(runs) == 0 {
 			break
 		}
-		<-run.done
+		for _, run := range runs {
+			<-run.done
+		}
 	}
 	close(r.stopped)
 }

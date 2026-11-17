@@ -289,7 +289,7 @@ A `Runner` holds one Agent and one store and serves any number of sessions: diff
 - From the call on, `Start`, `Compact`, new background tasks and `DeliverTaskResult` get `ErrClosed`.
 - Runs in progress are canceled, not left to finish: what the model has written is stored as an aborted message, and queued steer / follow-up messages come back in `Result.Pending`.
 - Background tasks are stopped with `Error` saying the Runner is shutting down, so a restarted session can tell them from tasks a user stopped; their results are written to history without waking the session (`ResultSavedToHistory`).
-- It waits until every result is delivered, `OnTaskFinished` included, and every run has ended; then `Subscribe` calls end, so handlers streaming them return. If `ctx` ends first it returns `ctx.Err()` and the work goes on in the background; tools and tasks that ignore cancellation cause that. Tasks a crash cuts off are left to `DeliverTaskResult` on the next start.
+- It waits until every result is delivered, `OnTaskFinished` included, and every run has ended; then `Subscribe` calls end, so handlers streaming them return. If `ctx` ends first it returns `ctx.Err()` and the work goes on in the background; tools and tasks that ignore cancellation cause that, and hold up every `Subscribe` call until they end. Tasks a crash cuts off are left to `DeliverTaskResult` on the next start.
 - Shut the Runner down before the HTTP server streaming its events, each with its own timeout. Do not call it from a task callback.
 
 ### Background tasks

@@ -177,3 +177,107 @@ func TestShutdownRacesTaskStarts(t *testing.T) {
 		t.Fatalf("every task started before the shutdown should be stopped and delivered: %+v", left)
 	}
 }
+
+// cancelSensitiveStore fails EnsureSession when its ctx is canceled, as a database store would; entered and release let a test cancel the run in between.
+type cancelSensitiveStore struct {
+	*session.MemoryStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *cancelSensitiveStore) EnsureSession(ctx context.Context, sess session.Session) error {
+	close(s.entered)
+	<-s.release
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.MemoryStore.EnsureSession(ctx, sess)
+}
+
+func TestShutdownRightAfterStartKeepsTheInput(t *testing.T) {
+	store := &cancelSensitiveStore{MemoryStore: session.NewMemoryStore(), entered: make(chan struct{}), release: make(chan struct{})}
+	r, _ := newRunner(t, newClient(chattest.Say("你好")), func(c *Config) { c.Store = store })
+	run, err := r.Start(bg, "s", Text("刚发出的问题"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-store.entered
+	ctx, cancel := context.WithTimeout(bg, 20*time.Millisecond)
+	defer cancel()
+	_ = r.Shutdown(ctx) // cancels the run while the session is being created
+	close(store.release)
+	if err := r.Shutdown(bg); err != nil {
+		t.Fatal(err)
+	}
+	run.Wait(bg)
+	if messages := saved(t, store.MemoryStore, "s"); len(messages) == 0 || messages[0].Text() != "刚发出的问题" {
+		t.Fatalf("a run aborted at once should still store its input: %+v", messages)
+	}
+}
+
+func TestShutdownAbortsASubAgent(t *testing.T) {
+	streaming := make(chan struct{})
+	mainClient := newClient(
+		chattest.CallTools(subAgentCall("c1", `{"agent":"worker","task":"查一下","description":"查"}`)),
+		chattest.Say("已派出"),
+	)
+	rec := newTaskRecorder()
+	r, store := newSubAgentRunner(t, mainClient, chattest.NewClient(writeThenWait(streaming)), rec)
+	if _, err := runSync(r, bg, "s", Text("派个子任务")); err != nil {
+		t.Fatal(err)
+	}
+	<-streaming
+
+	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
+	defer cancel()
+	if err := r.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := rec.wait(t)
+	if f.task.Status != tool.TaskStopped || f.task.Error != shutdownReason {
+		t.Fatalf("the sub-agent task should be stopped with the reason: %+v", f.task)
+	}
+	child := saved(t, store, f.task.ID)
+	if last := child[len(child)-1]; last.ChatMessage.StopReason != chat.StopReasonAborted || last.Text() != "写到一半" {
+		t.Fatalf("the child session's run should be aborted and keep what it wrote: %+v", last)
+	}
+	parent := saved(t, store, "s")
+	if last := parent[len(parent)-1]; last.Kind != session.KindTaskResult || !strings.Contains(last.Text(), `status="stopped"`) {
+		t.Fatalf("the parent session should receive the stopped result: %q", last.Text())
+	}
+}
+
+func TestShutdownAbortsACompaction(t *testing.T) {
+	summarizing := make(chan struct{})
+	client := newClient(chattest.Say("回答一"), chattest.Say("回答二"), func(ctx context.Context, b *chat.Builder) {
+		close(summarizing)
+		<-ctx.Done()
+		b.Fail(chat.WrapError(ctx, ctx.Err(), 0, 0))
+	})
+	client.Model.MaxInputTokens = 100000
+	r, store := newRunner(t, client)
+	for _, q := range []string{"问题一", "问题二"} {
+		if _, err := runSync(r, bg, "c", Text(long(q))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(saved(t, store, "c"))
+
+	compacted := make(chan error, 1)
+	go func() {
+		_, _, err := r.Compact(bg, "c", CompactOptions{})
+		compacted <- err
+	}()
+	<-summarizing
+	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
+	defer cancel()
+	if err := r.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-compacted; err == nil {
+		t.Fatal("a compaction cut off by Shutdown should fail")
+	}
+	if after := saved(t, store, "c"); len(after) != before {
+		t.Fatalf("an aborted compaction should store no summary: %s", sessionRoles(after))
+	}
+}
