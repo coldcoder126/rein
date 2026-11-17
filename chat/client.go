@@ -7,12 +7,11 @@ import (
 
 // Usage holds the standard token usage of one model call.
 type Usage struct {
-	Input       int     `json:"input"`
-	Output      int     `json:"output"`
-	CacheRead   int     `json:"cache_read"`
-	CacheWrite  int     `json:"cache_write"`
-	TotalTokens int     `json:"total_tokens"`
-	Cost        float64 `json:"cost,omitempty"`
+	Input       int `json:"input"`
+	Output      int `json:"output"`
+	CacheRead   int `json:"cache_read"`
+	CacheWrite  int `json:"cache_write"`
+	TotalTokens int `json:"total_tokens"`
 }
 
 // Add returns the sum of two Usage values.
@@ -23,7 +22,6 @@ func (u Usage) Add(other Usage) Usage {
 		CacheRead:   u.CacheRead + other.CacheRead,
 		CacheWrite:  u.CacheWrite + other.CacheWrite,
 		TotalTokens: u.TotalTokens + other.TotalTokens,
-		Cost:        u.Cost + other.Cost,
 	}
 }
 
