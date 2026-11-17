@@ -53,6 +53,8 @@ type Compat struct {
 	// NoDisableThinking means thinking cannot be turned off: chat.ReasoningOff asks for the lowest effort instead,
 	// and forced tool calls, which do not go with thinking, are rejected before the request is sent.
 	NoDisableThinking bool
+	// NoMediumEffort means effort has no medium; high is used instead, as the services that lack it do themselves.
+	NoMediumEffort bool
 	// NoXHigh means effort has no xhigh; high is used instead.
 	NoXHigh bool
 	// NoMaxEffort means effort has no max; xhigh is used instead, or high with NoXHigh.
@@ -76,6 +78,7 @@ func (c Compat) merge(other Compat) Compat {
 		NoMedia:             c.NoMedia || other.NoMedia,
 		NoAdaptiveThinking:  c.NoAdaptiveThinking || other.NoAdaptiveThinking,
 		NoDisableThinking:   c.NoDisableThinking || other.NoDisableThinking,
+		NoMediumEffort:      c.NoMediumEffort || other.NoMediumEffort,
 		NoXHigh:             c.NoXHigh || other.NoXHigh,
 		NoMaxEffort:         c.NoMaxEffort || other.NoMaxEffort,
 		NoThinkingBinding:   c.NoThinkingBinding || other.NoThinkingBinding,

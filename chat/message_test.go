@@ -14,7 +14,7 @@ func TestCloneSharesBytes(t *testing.T) {
 		{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("png")},
 		{Type: chat.ContentTypeToolCall, ToolCall: &chat.ToolCall{ID: "c1", Name: "f", Arguments: json.RawMessage(`{}`)}},
 		{Type: chat.ContentTypeServerTool, Name: "s", Raw: json.RawMessage(`{"type":"x"}`)},
-	}}
+	}, Extra: map[string]json.RawMessage{"title": json.RawMessage(`"t"`)}}
 	clone := msg.Clone()
 	if &clone.Content[1].Data[0] != &msg.Content[1].Data[0] || &clone.Content[3].Raw[0] != &msg.Content[3].Raw[0] ||
 		&clone.Content[2].ToolCall.Arguments[0] != &msg.Content[2].ToolCall.Arguments[0] {
@@ -23,6 +23,10 @@ func TestCloneSharesBytes(t *testing.T) {
 	clone.Content[0].Text = "changed"
 	clone.Content[2].ToolCall.Name = "g"
 	clone.Content = append(clone.Content, chat.Text("more"))
+	clone.Extra["other"] = json.RawMessage(`1`)
+	if len(msg.Extra) != 1 {
+		t.Fatalf("changing a clone's extra fields should not change the original: %v", msg.Extra)
+	}
 	if msg.Content[0].Text != "hi" || msg.Content[2].ToolCall.Name != "f" || len(msg.Content) != 4 {
 		t.Fatalf("changing a clone's blocks should not change the original: %+v", msg.Content)
 	}

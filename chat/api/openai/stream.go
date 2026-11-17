@@ -37,6 +37,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 		defer stream.Close()
 
 		state := newStreamState(b, c.cfg.Endpoint.Provider)
+		state.responseFields = c.cfg.ResponseFields
 		if resp != nil {
 			state.requestID = resp.Header.Get("x-request-id")
 		}
@@ -100,6 +101,8 @@ func (it outputItem) reasoningText() string {
 type streamState struct {
 	b        *chat.Builder
 	provider string
+	// responseFields are the fields of the final response to keep, see Config.ResponseFields.
+	responseFields []string
 
 	done map[string]bool
 	// blockOf maps output items to their text or thinking block positions, used to add signatures and close blocks on completion.
@@ -201,6 +204,7 @@ func (s *streamState) handle(event responses.ResponseStreamEventUnion) bool {
 func (s *streamState) responseEnded(event responses.ResponseStreamEventUnion) bool {
 	s.terminal = true
 	resp := event.Response
+	s.b.KeepFields(resp.RawJSON(), s.responseFields)
 	if event.Type == "response.incomplete" {
 		s.incomplete = resp.IncompleteDetails.Reason
 		if s.incomplete == "" {

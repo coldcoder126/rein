@@ -125,6 +125,20 @@ func TestStreamFullResponseWithAllItemTypes(t *testing.T) {
 	}
 }
 
+// Fields of the final response that are outside the protocol are kept when the client was told to.
+func TestStreamKeepsDeclaredResponseFields(t *testing.T) {
+	final := ev("response.completed", `"response":{"id":"resp_1","model":"m","status":"completed","title":"Greeting","other":1,"output":[`+messageRaw+`],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	events := run(t, newTestClient(t, Config{Model: plain, ResponseFields: []string{"title", "absent"}}, serveEvents(ev("response.created", created), final)))
+	extra := events[len(events)-1].Message.Extra
+	if len(extra) != 1 || string(extra["title"]) != `"Greeting"` {
+		t.Fatalf("wrong extra fields: %s", extra)
+	}
+	events = run(t, newTestClient(t, Config{Model: plain}, serveEvents(ev("response.created", created), final)))
+	if extra := events[len(events)-1].Message.Extra; extra != nil {
+		t.Fatalf("a client that names no fields should keep none: %s", extra)
+	}
+}
+
 func TestStreamReconcilesItemsWithoutDoneEvents(t *testing.T) {
 	// Endpoints that omit output_item.done (such as DeepSeek): items are filled in from the final output of response.completed.
 	deepseekReasoning := `{"id":"rs_ds","type":"reasoning","content":[{"type":"reasoning_text","text":"明文推理"}]}`

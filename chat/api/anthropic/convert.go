@@ -94,6 +94,9 @@ func (c *Client) buildParams(req chat.Request) (goanthropic.MessageNewParams, er
 			return goanthropic.MessageNewParams{}, fmt.Errorf("anthropic: unknown ToolChoice %q", req.ToolChoice.Mode)
 		}
 	}
+	if len(c.cfg.ExtraBody) > 0 {
+		params.SetExtraFields(c.cfg.ExtraBody)
+	}
 	return params, nil
 }
 

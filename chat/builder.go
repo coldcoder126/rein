@@ -53,6 +53,28 @@ func (b *Builder) SetResponse(id, model string) {
 	b.msg.ResponseModel = model
 }
 
+// KeepFields records in Message.Extra the named top-level fields of object, a JSON object of the provider's response.
+// Names the object lacks or holds as null are skipped, and a later call replaces a field kept by an earlier one.
+func (b *Builder) KeepFields(object string, names []string) {
+	if len(names) == 0 {
+		return
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(object), &fields) != nil {
+		return
+	}
+	for _, name := range names {
+		raw, ok := fields[name]
+		if !ok || string(raw) == "null" {
+			continue
+		}
+		if b.msg.Extra == nil {
+			b.msg.Extra = make(map[string]json.RawMessage)
+		}
+		b.msg.Extra[name] = raw
+	}
+}
+
 // SetUsage updates the accumulated token usage.
 func (b *Builder) SetUsage(u Usage) { b.msg.Usage = u }
 

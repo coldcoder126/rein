@@ -62,6 +62,7 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 				messageID = start.ID
 				b.SetResponse(start.ID, string(start.Model))
 				b.SetUsage(usageFromAnthropic(usage))
+				b.KeepFields(start.RawJSON(), c.cfg.ResponseFields)
 				if !b.Start() {
 					return
 				}
@@ -133,6 +134,9 @@ func (c *Client) Stream(ctx context.Context, req chat.Request) iter.Seq[chat.Eve
 				stopReason = md.Delta.StopReason
 				usage = mergeDeltaUsage(usage, md.Usage)
 				b.SetUsage(usageFromAnthropic(usage))
+				// Services differ in where they put a field decided at the end of the reply.
+				b.KeepFields(md.RawJSON(), c.cfg.ResponseFields)
+				b.KeepFields(md.Delta.RawJSON(), c.cfg.ResponseFields)
 			}
 		}
 		if err := stream.Err(); err != nil {
