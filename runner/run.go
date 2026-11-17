@@ -31,14 +31,14 @@ type Result struct {
 
 // Start processes one user input in a session: it occupies the session, stores the input, loads the history and drives the Agent
 // to the end in the background, returning as soon as the run has started. The session is created if it does not exist;
-// an empty sessionID generates a new one, see Run.SessionID. It returns ErrBusy at once when the session already has a run in progress,
-// and an error when neither WithModel nor Agent.Model gives a model.
+// an empty sessionID generates a new one, see Run.SessionID. It returns ErrBusy at once when the session already has a run in progress
+// (a background task's result being written to history is waited for instead), and an error when neither WithModel nor Agent.Model gives a model.
 //
 // The run keeps ctx's values but not its cancellation, so it goes on after the caller returns or a client disconnects;
 // stop it with Abort. Watch it with Run.Events or Subscribe and get its result with Run.Wait.
 //
 // An empty in (Input{}) appends no new input and continues from the existing history, for example to wake the main Agent after a background
-// task's result was written to history; the history must then end with a user-side message or a tool result.
+// task's result was written to history (see Config.TaskWake to have the Runner do this); the history must then end with a user-side message or a tool result.
 func (r *Runner) Start(ctx context.Context, sessionID string, in Input, opts ...RunOption) (*Run, error) {
 	var content []chat.ContentBlock
 	if len(in.Content) > 0 {
@@ -64,11 +64,14 @@ func (r *Runner) Start(ctx context.Context, sessionID string, in Input, opts ...
 		cancel()
 		return nil, err
 	}
-	go func() {
-		run.result, run.err = r.process(ctx, runCtx, run, content, options)
-		r.release(sessionID, run)
-	}()
+	go r.drive(ctx, runCtx, run, content, options)
 	return run, nil
+}
+
+// drive runs an occupied session's run to the end and frees the session.
+func (r *Runner) drive(ctx, runCtx context.Context, run *Run, content []chat.ContentBlock, options runOptions) {
+	run.result, run.err = r.process(ctx, runCtx, run, content, options)
+	r.release(run.sessionID, run)
 }
 
 // ID returns the run ID, which every message stored by the run carries.
@@ -337,6 +340,9 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 		} else {
 			st.runContext = append(st.runContext, msg)
 		}
+	}
+	if options.notice != nil {
+		initial = append(initial, *options.notice)
 	}
 	if len(content) > 0 {
 		user := session.UserMessage(content, options.details)

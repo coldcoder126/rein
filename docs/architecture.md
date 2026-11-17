@@ -271,7 +271,7 @@ A `Runner` holds one Agent and one store and serves any number of sessions: diff
 ### Runs
 
 - `Config.Middlewares` are the runtime middlewares; see "Middleware" under agent. Sub-tasks of spawned sub-agents use the same set.
-- `Start(ctx, sessionID, input)`: processes one user input, creating the session if needed, and returns a `*Run` as soon as the run has started; a busy session gets `ErrBusy` at once. One run drives exactly one Agent run to the end in the background: it keeps the values of `ctx` but not its cancellation, so it does not depend on anyone watching it. `Run.Wait` returns its result.
+- `Start(ctx, sessionID, input)`: processes one user input, creating the session if needed, and returns a `*Run` as soon as the run has started; a busy session gets `ErrBusy` at once, except while a task result is being written to history, which is waited for. One run drives exactly one Agent run to the end in the background: it keeps the values of `ctx` but not its cancellation, so it does not depend on anyone watching it. `Run.Wait` returns its result.
 - The session is the address and the `*Run` is the handle: `Start` returns it, and `Current(sessionID)` finds the one in progress (nil when idle) for requests that know only the session. Everything about a run goes through the handle:
   - `Steer`: interjects mid-run, injected after the current turn's tools finish and before the next model call.
   - `FollowUp`: queues a follow-up task, injected when the model gives its final reply and the run would end.
@@ -288,15 +288,16 @@ A `Runner` holds one Agent and one store and serves any number of sessions: diff
 
 Background tasks spawned by the main run (sub-agents, background commands and so on) are registered in one task table on the Runner, with `tool.Task.Type` telling them apart. The Runner injects the session's `tool.TaskManager` into every main run; sub-task runs do not get one, so sub-agents cannot spawn background tasks.
 
-- Tasks do not follow the run that started them: neither the end of the main run nor `Abort` cancels them, and only the model's `task(stop)` or `StopTask` stops them. `ListTasks(sessionID)` lists the session's tasks whose results have not been delivered. Task snapshots keep only the last 32KB of output. Running tasks are lost when the process exits.
+- Tasks do not follow the run that started them: neither the end of the main run nor `Abort` cancels them, and only the model's `task(stop)` or `StopTask` stops them. `ListTasks(sessionID)` lists the session's tasks whose results have not been delivered. Task snapshots keep only the last 32KB of output. Running tasks are lost when the process exits: a business layer that records them with `OnTaskStarted` / `OnTaskFinished` can, after a restart, hand each one to `DeliverTaskResult` as failed, which sends its result back like a task that just ended, so the session does not wait for it forever.
 - Each sub-agent task runs in a new child session whose ID is the task ID: a Runner sharing the store runs the sub-agent, so storing, replay and compaction work as in the main session and every message can be audited. The task ID leads from parent to child, and the session metadata's `ParentID` from child to parent. A sub-task snapshot's `Details` is `agent.SubAgentDetails` (turns, latest tool, usage).
 - When a task ends (completed, failed, stopped), its result comes back to the session that spawned it as a notice message: a `<task_result>` with the task ID, type, status and description around the result or error; its `Kind` is `task_result`, it is hidden from the user by default, and `Details` is the task's final snapshot.
   - While the session runs: the notice is injected between turns, and one arriving when the run would end makes it run one more turn; notices not injected in time are stored when the run ends.
-  - While the session is idle: a short run of its own writes it to history (new runs get `ErrBusy` meanwhile).
+  - While the session is idle and `TaskWake` asks for it: the notice starts a run as its input, with the options `TaskWake` returns (the spawning run's options are not carried over); results arriving meanwhile are injected into that run, so tasks ending together wake the session once.
+  - While the session is idle otherwise: a short run of its own writes it to history (new runs wait for it).
 - Three callbacks track tasks of every kind, all called synchronously on the task's goroutine:
   - `OnTaskStarted`: after the task starts, called first.
   - `OnTaskProgressed`: every time the task reports progress, for live display. Sub-agent progress carries the run events of the child session, and background command progress carries the new output.
-  - `OnTaskFinished`: after the result has been sent back to the session, called last. With `ResultInjectedIntoRun` the main Agent is already handling it; with `ResultSavedToHistory` the main Agent has not seen it yet, and the business layer decides whether to wake it with an empty input. The framework never wakes it on its own.
+  - `OnTaskFinished`: after the result has been sent back to the session, called last. With `ResultInjectedIntoRun` the main Agent is already handling it; with `ResultStartedRun` a run was started for it; with `ResultSavedToHistory` the main Agent has not seen it yet.
 - The concrete type of `Details` after a store round trip depends on the store implementation (a JSON store reads it back as a map).
 
 ### When messages are stored

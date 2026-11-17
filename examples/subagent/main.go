@@ -30,51 +30,35 @@ func main() {
 		Tools: []tool.Tool{agent.SubAgentTool(agent.SubAgentConfig{}), task.Tool()},
 	}
 
-	// A result that arrives while the session is idle is only written to history; the business decides when the Agent continues.
-	saved := make(chan tool.Task, 16)
+	// A result that arrives while the session is idle wakes the Agent with it; results arriving during a run are injected into that run.
 	r, err := runner.New(runner.Config{
 		Agent: a,
 		Store: session.NewMemoryStore(),
 		OnTaskFinished: func(_ context.Context, t tool.Task, delivery runner.TaskResultDelivery) {
-			fmt.Printf("[task %s %s]\n", t.Description, t.Status)
-			if delivery == runner.ResultSavedToHistory {
-				saved <- t
-			}
+			fmt.Printf("[task %s %s, %s]\n", t.Description, t.Status, delivery)
 		},
+		TaskWake: func(context.Context, tool.Task) ([]runner.RunOption, bool) { return nil, true },
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	ctx, sessionID := context.Background(), "demo-session"
-	input := runner.Text("Give me one strength and one weakness each of Go and Rust for writing web services. Research each language with its own sub-agent.")
-	for {
-		run, err := r.Start(ctx, sessionID, input)
-		if err != nil {
-			log.Fatal(err)
-		}
+	run, err := r.Start(ctx, sessionID, runner.Text("Give me one strength and one weakness each of Go and Rust for writing web services. "+
+		"Research each language with its own sub-agent."))
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Follow the first run and every run the results wake, until no task is left and the session is idle.
+	// A task leaves the task table only after its result has been delivered, so a woken run is already current by then.
+	for run != nil {
 		result, err := run.Wait(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println(result.Final.Text())
-
-		// Wait for the remaining sub-agents, then let the Agent continue with the results saved to history.
-		n := 0
-		for len(r.ListTasks(sessionID)) > 0 {
-			select {
-			case <-saved:
-				n++
-			case <-time.After(100 * time.Millisecond):
-			}
+		for run = r.Current(sessionID); run == nil && len(r.ListTasks(sessionID)) > 0; run = r.Current(sessionID) {
+			time.Sleep(100 * time.Millisecond)
 		}
-		for len(saved) > 0 {
-			<-saved
-			n++
-		}
-		if n == 0 {
-			return
-		}
-		input = runner.Text("All sub-agent results are in. Continue.")
 	}
 }

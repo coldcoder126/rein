@@ -260,21 +260,60 @@ func runSubAgent(ctx context.Context, child *Runner, sessionID string, in agent.
 	return out, runErr
 }
 
+// DeliverTaskResult sends the final result of a task this Runner is not running back to its session, as if the task had just ended:
+// it is injected into the session's run, starts a run per Config.TaskWake, or is written to history. It is for tasks the business
+// layer tracked with OnTaskStarted and OnTaskFinished that a restart cut off: deliver them as TaskFailed with the reason in Error,
+// so the session does not wait for them forever. OnTaskFinished is not called.
+func (r *Runner) DeliverTaskResult(ctx context.Context, t tool.Task) (TaskResultDelivery, error) {
+	if t.ID == "" || t.SessionID == "" {
+		return "", errors.New("runner: the task needs an ID and a SessionID")
+	}
+	if t.Status == tool.TaskRunning || t.Status == "" {
+		return "", fmt.Errorf("runner: task %s has no final status", t.ID)
+	}
+	r.mu.Lock()
+	running := r.tasks[t.ID] != nil
+	r.mu.Unlock()
+	if running {
+		return "", fmt.Errorf("runner: task %s is still running here and delivers its own result", t.ID)
+	}
+	return r.deliverTaskResult(ctx, t)
+}
+
 // deliverTaskResult sends a task's result back to the session that spawned it as a notice and returns how it was delivered:
 // while the session runs, the notice is queued until the run injects it or stores it while finishing;
-// while the session is idle, it is occupied briefly and the notice is written directly to history.
+// while the session is idle, the notice starts a run when TaskWake asks for one, or else the session is occupied briefly and the notice is written to history.
 func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResultDelivery, error) {
 	msg := taskNotice(t)
 	sessionID := t.SessionID
+	ctx = context.WithoutCancel(ctx)
+	var wake bool
+	var options runOptions
+	if r.taskWake != nil {
+		var opts []RunOption
+		opts, wake = r.taskWake(ctx, t)
+		for _, opt := range opts {
+			opt(&options)
+		}
+		// Without a model there is nothing to wake: write to history instead.
+		wake = wake && r.model(options.model) != nil
+	}
 	for {
 		r.mu.Lock()
 		h := r.active[sessionID]
 		switch {
-		case h == nil:
-			// While it is occupied new runs get ErrBusy, and other senders wait for it to be released.
-			hold := r.occupy(sessionID, func() {}, true)
+		case h == nil && wake:
+			runCtx, cancel := context.WithCancel(ctx)
+			run := r.occupy(sessionID, cancel, false)
 			r.mu.Unlock()
-			ctx := context.WithoutCancel(ctx)
+			options.notice = &msg
+			go r.drive(ctx, runCtx, run, nil, options)
+			return ResultStartedRun, nil
+		case h == nil:
+			// While it is occupied new runs wait for it, and other senders wait for it to be released.
+			hold := r.occupy(sessionID, func() {}, true)
+			hold.writesTaskResult = true
+			r.mu.Unlock()
 			_, err := r.occupation(ctx, hold, r.agent.Model, func(st *runState) error { return st.save(ctx, msg) })
 			return ResultSavedToHistory, err
 		case !h.ending:

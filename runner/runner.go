@@ -62,9 +62,14 @@ type Config struct {
 	// and for a background command update.Output is the new output.
 	OnTaskProgressed func(ctx context.Context, task tool.Task, update tool.TaskUpdate)
 	// OnTaskFinished is called after a task ends and its result has been sent back to the session that spawned it, exactly once per task and last.
-	// When delivery is ResultSavedToHistory the main Agent has not seen the result yet, and the business layer decides whether to wake it,
-	// for example with r.Start(ctx, task.SessionID, Input{}).
+	// When delivery is ResultSavedToHistory the main Agent has not seen the result yet; TaskWake lets the Runner wake it instead.
 	OnTaskFinished func(ctx context.Context, task tool.Task, delivery TaskResultDelivery)
+
+	// TaskWake decides whether a task's result starts a run when it reaches an idle session, and with which options (WithModel,
+	// WithContext and so on; the options of the run that spawned the task are not carried over). The result is that run's input,
+	// and results of other tasks ending meanwhile are injected into it. It is called for every finished task, on the task's
+	// goroutine, before the session's state is known. Nil never wakes: results reaching an idle session are only written to history.
+	TaskWake func(ctx context.Context, task tool.Task) (opts []RunOption, wake bool)
 }
 
 // TaskResultDelivery says how a background task's result was sent back to the session.
@@ -75,6 +80,8 @@ const (
 	ResultInjectedIntoRun TaskResultDelivery = "injected_into_run"
 	// ResultSavedToHistory means the session was idle and the result was only written to history; the main Agent has not seen it yet.
 	ResultSavedToHistory TaskResultDelivery = "saved_to_history"
+	// ResultStartedRun means the session was idle and TaskWake started a run with the result as its input.
+	ResultStartedRun TaskResultDelivery = "started_run"
 )
 
 // Runner runs one Agent and serves many sessions. It is safe for concurrent use.
@@ -89,6 +96,7 @@ type Runner struct {
 	onTaskStarted    func(context.Context, tool.Task)
 	onTaskProgressed func(context.Context, tool.Task, tool.TaskUpdate)
 	onTaskFinished   func(context.Context, tool.Task, TaskResultDelivery)
+	taskWake         func(context.Context, tool.Task) ([]RunOption, bool)
 
 	mu     sync.Mutex
 	active map[string]*Run
@@ -140,6 +148,8 @@ type Run struct {
 	delivered map[string]chan TaskResultDelivery
 	// ending means the run is finishing and no longer accepts notices; senders wait for it to end and write to history instead.
 	ending bool
+	// writesTaskResult means the occupation only writes a task result to history; new runs wait for it rather than get ErrBusy.
+	writesTaskResult bool
 }
 
 // New creates a Runner.
@@ -169,6 +179,7 @@ func New(cfg Config) (*Runner, error) {
 		onTaskStarted:    cfg.OnTaskStarted,
 		onTaskProgressed: cfg.OnTaskProgressed,
 		onTaskFinished:   cfg.OnTaskFinished,
+		taskWake:         cfg.TaskWake,
 
 		active:    make(map[string]*Run),
 		followers: make(map[string]*follower),
@@ -196,14 +207,25 @@ func (r *Runner) Current(sessionID string) *Run {
 }
 
 // acquire occupies the session and registers a Run, returning ErrBusy when the session already has a run.
+// Writing a task result occupies the session only briefly, so acquire waits for that instead.
 // When ending is true the Run accepts no interjections or notices from the start, for occupations that do not run the Agent (such as manual compaction).
 func (r *Runner) acquire(sessionID string, cancel context.CancelFunc, ending bool) (*Run, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.active[sessionID] != nil {
-		return nil, ErrBusy
+	for {
+		h := r.active[sessionID]
+		if h == nil {
+			run := r.occupy(sessionID, cancel, ending)
+			r.mu.Unlock()
+			return run, nil
+		}
+		if !h.writesTaskResult {
+			r.mu.Unlock()
+			return nil, ErrBusy
+		}
+		r.mu.Unlock()
+		<-h.done
+		r.mu.Lock()
 	}
-	return r.occupy(sessionID, cancel, ending), nil
 }
 
 // occupy registers a new Run for an idle session and links it after the previous one for the session's followers.

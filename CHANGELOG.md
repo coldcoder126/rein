@@ -6,6 +6,9 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 ### Added
 
+- `runner.Config.TaskWake`: a task result reaching an idle session can start a run with the result as its input (`ResultStartedRun`); results arriving meanwhile are injected into it, so tasks ending together wake the session once.
+- `Runner.DeliverTaskResult` sends the result of a task the Runner is not running, such as one a restart cut off, back to its session like a task that just ended.
+- `Start` waits while a task result is being written to an idle session's history instead of returning `ErrBusy`.
 - `chat.Error.RequestID`: refusals from the Anthropic and OpenAI protocols report the provider's request ID (the response header, else the message or response ID), shown at the end of `Error()`.
 
 ### Fixed

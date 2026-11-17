@@ -89,6 +89,8 @@ type runOptions struct {
 	model   chat.Client
 	// A non-nil parent means this run is a sub-task, and its session hangs under the session of the run that started it.
 	parent *tool.RunInfo
+	// notice is the task result notice that woke this run, stored as its input.
+	notice *session.Message
 }
 
 // WithContext injects business context into this run.
