@@ -127,6 +127,7 @@ func (run *Run) Events(ctx context.Context) iter.Seq[Event] {
 // that run and of every later run of the session in order, until ctx is done. While the session is idle it waits for the next run.
 // No run is missed, even one that starts and ends while the receiver is still busy with the previous one.
 // It suits views that attach to a session at any time, such as a page reopened in the middle of a reply; earlier runs are read from the store.
+// It also ends once Shutdown has finished, after the session's last run.
 func (r *Runner) Subscribe(ctx context.Context, sessionID string) iter.Seq[Event] {
 	return func(yield func(Event) bool) {
 		r.mu.Lock()
@@ -165,6 +166,13 @@ func (r *Runner) Subscribe(ctx context.Context, sessionID string) iter.Seq[Event
 		for {
 			select {
 			case <-cur.nextReady:
+			case <-r.stopped:
+				// No run starts after Shutdown has finished; one already linked is still followed.
+				select {
+				case <-cur.nextReady:
+				default:
+					return
+				}
 			case <-ctx.Done():
 				return
 			}

@@ -22,8 +22,9 @@ const outputLimit = 32 << 10
 type task struct {
 	snapshot tool.Task
 	cancel   context.CancelFunc
-	// stopped means the task was halted by Stop.
+	// stopped means the task was halted by Stop or Shutdown; reason, when set, becomes the task's Error.
 	stopped bool
+	reason  string
 	// ended is closed by runTask once the final snapshot is settled; the result has not been sent back to the session yet.
 	ended chan struct{}
 }
@@ -31,20 +32,28 @@ type task struct {
 type taskRun func(ctx context.Context, report func(tool.TaskUpdate)) (tool.TaskResult, error)
 
 // startTask registers a task and runs it in the background. Tasks outlive the tool call and run that started them: they are not canceled with them and only Stop halts them.
-func (r *Runner) startTask(ctx context.Context, snapshot tool.Task, run taskRun) tool.Task {
+// It returns ErrClosed after Shutdown.
+func (r *Runner) startTask(ctx context.Context, snapshot tool.Task, run taskRun) (tool.Task, error) {
 	base := context.WithoutCancel(ctx)
 	runCtx, cancel := context.WithCancel(base)
 	snapshot.Status, snapshot.StartedAt = tool.TaskRunning, time.Now()
 	t := &task{snapshot: snapshot, cancel: cancel, ended: make(chan struct{})}
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		cancel()
+		return tool.Task{}, ErrClosed
+	}
 	r.tasks[snapshot.ID] = t
+	r.pending.Add(1)
 	r.mu.Unlock()
 	go r.runTask(base, runCtx, t, run)
-	return snapshot
+	return snapshot, nil
 }
 
 // runTask runs the task and sends its result back to the session that spawned it when it ends. Callbacks receive base, which stays usable after the task is stopped.
 func (r *Runner) runTask(base, ctx context.Context, t *task, run taskRun) {
+	defer r.pending.Done()
 	defer t.cancel()
 	if r.onTaskStarted != nil {
 		r.onTaskStarted(base, r.snapshotOf(t))
@@ -112,6 +121,7 @@ func (r *Runner) endTask(t *task, result tool.TaskResult, err error) tool.Task {
 		s.Status = tool.TaskCompleted
 	case t.stopped:
 		s.Status = tool.TaskStopped
+		s.Error = t.reason
 	default:
 		s.Status = tool.TaskFailed
 		s.Error = err.Error()
@@ -178,7 +188,7 @@ func (s sessionTaskManager) Start(ctx context.Context, spec tool.TaskSpec) (tool
 		return tool.Task{}, errors.New("runner: TaskSpec.Run must not be nil")
 	}
 	snapshot := tool.Task{ID: newID("task"), Type: spec.Type, SessionID: s.sessionID, Description: spec.Description}
-	return s.r.startTask(ctx, snapshot, spec.Run), nil
+	return s.r.startTask(ctx, snapshot, spec.Run)
 }
 
 func (s sessionTaskManager) List(context.Context) []tool.Task { return s.r.ListTasks(s.sessionID) }
@@ -218,7 +228,7 @@ func (e subAgentExecutor) Start(ctx context.Context, in agent.SubAgentInput) (to
 		Description: in.Description, Details: details}
 	return r.startTask(ctx, snapshot, func(ctx context.Context, report func(tool.TaskUpdate)) (tool.TaskResult, error) {
 		return runSubAgent(ctx, child, snapshot.ID, in, details, report)
-	}), nil
+	})
 }
 
 // runSubAgent runs a sub-task on its child session. A sub-task is just an ordinary run on a Runner sharing the store,
@@ -263,7 +273,7 @@ func runSubAgent(ctx context.Context, child *Runner, sessionID string, in agent.
 // DeliverTaskResult sends the final result of a task this Runner is not running back to its session, as if the task had just ended:
 // it is injected into the session's run, starts a run per Config.TaskWake, or is written to history. It is for tasks the business
 // layer tracked with OnTaskStarted and OnTaskFinished that a restart cut off: deliver them as TaskFailed with the reason in Error,
-// so the session does not wait for them forever. OnTaskFinished is not called.
+// so the session does not wait for them forever. OnTaskFinished is not called. It returns ErrClosed after Shutdown.
 func (r *Runner) DeliverTaskResult(ctx context.Context, t tool.Task) (TaskResultDelivery, error) {
 	if t.ID == "" || t.SessionID == "" {
 		return "", errors.New("runner: the task needs an ID and a SessionID")
@@ -272,17 +282,23 @@ func (r *Runner) DeliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 		return "", fmt.Errorf("runner: task %s has no final status", t.ID)
 	}
 	r.mu.Lock()
-	running := r.tasks[t.ID] != nil
-	r.mu.Unlock()
-	if running {
+	switch {
+	case r.closed:
+		r.mu.Unlock()
+		return "", ErrClosed
+	case r.tasks[t.ID] != nil:
+		r.mu.Unlock()
 		return "", fmt.Errorf("runner: task %s is still running here and delivers its own result", t.ID)
 	}
+	r.pending.Add(1)
+	r.mu.Unlock()
+	defer r.pending.Done()
 	return r.deliverTaskResult(ctx, t)
 }
 
 // deliverTaskResult sends a task's result back to the session that spawned it as a notice and returns how it was delivered:
 // while the session runs, the notice is queued until the run injects it or stores it while finishing;
-// while the session is idle, the notice starts a run when TaskWake asks for one, or else the session is occupied briefly and the notice is written to history.
+// while the session is idle, the notice starts a run when TaskWake asks for one (never after Shutdown), or else the session is occupied briefly and the notice is written to history.
 func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResultDelivery, error) {
 	msg := taskNotice(t)
 	sessionID := t.SessionID
@@ -292,7 +308,7 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 		r.mu.Lock()
 		h := r.active[sessionID]
 		switch {
-		case h == nil && wake:
+		case h == nil && wake && !r.closed:
 			runCtx, cancel := context.WithCancel(ctx)
 			run := r.occupy(sessionID, cancel, false)
 			r.mu.Unlock()

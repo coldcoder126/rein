@@ -25,6 +25,8 @@ import (
 var (
 	// ErrBusy means the session already has a run in progress.
 	ErrBusy = errors.New("runner: session is busy")
+	// ErrClosed means the Runner is shutting down or has shut down, see Runner.Shutdown.
+	ErrClosed = errors.New("runner: closed")
 	// ErrNotRunning means the run no longer takes queued messages: it is finishing or has ended, or it does not run the Agent.
 	ErrNotRunning = errors.New("runner: run is not running")
 	// ErrInvalidConfig means the Runner configuration is incomplete.
@@ -104,6 +106,15 @@ type Runner struct {
 	followers map[string]*follower
 	// tasks are the background tasks spawned by sessions on this Runner whose results have not been delivered, keyed by task ID.
 	tasks map[string]*task
+
+	// closed refuses new runs, compactions, tasks and deliveries once Shutdown has been called.
+	closed bool
+	// pending counts the background tasks and the deliveries of DeliverTaskResult until they are done, OnTaskFinished included.
+	// It is only incremented under mu while not closed, so Shutdown can wait for it.
+	pending      sync.WaitGroup
+	shutdownOnce sync.Once
+	// stopped is closed once Shutdown has finished everything: tasks delivered and runs ended.
+	stopped chan struct{}
 }
 
 // Run is one occupation of a session, the handle for everything about it: it runs in the background whether or not anyone watches it,
@@ -184,6 +195,7 @@ func New(cfg Config) (*Runner, error) {
 		active:    make(map[string]*Run),
 		followers: make(map[string]*follower),
 		tasks:     make(map[string]*task),
+		stopped:   make(chan struct{}),
 	}, nil
 }
 
@@ -206,12 +218,16 @@ func (r *Runner) Current(sessionID string) *Run {
 	return r.active[sessionID]
 }
 
-// acquire occupies the session and registers a Run, returning ErrBusy when the session already has a run.
+// acquire occupies the session and registers a Run, returning ErrBusy when the session already has a run and ErrClosed after Shutdown.
 // Writing a task result occupies the session only briefly, so acquire waits for that instead.
 // When ending is true the Run accepts no interjections or notices from the start, for occupations that do not run the Agent (such as manual compaction).
 func (r *Runner) acquire(sessionID string, cancel context.CancelFunc, ending bool) (*Run, error) {
 	r.mu.Lock()
 	for {
+		if r.closed {
+			r.mu.Unlock()
+			return nil, ErrClosed
+		}
 		h := r.active[sessionID]
 		if h == nil {
 			run := r.occupy(sessionID, cancel, ending)
@@ -259,4 +275,61 @@ func newID(prefix string) string {
 		return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b[:]))
 	}
 	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+}
+
+// shutdownReason is the error of the tasks Shutdown stops.
+const shutdownReason = "runner is shutting down"
+
+// Shutdown stops the Runner, for a planned exit such as a deploy: from the call on, Start, Compact, new background tasks and
+// DeliverTaskResult get ErrClosed. Runs in progress are aborted, keeping what the model has written as an aborted message and
+// their queued steer / follow-up messages in Result.Pending; background tasks are stopped with the reason in Task.Error, and their
+// results are written to history without waking the session. It then waits until every result is delivered (OnTaskFinished
+// included) and every run has ended, after which Subscribe calls end.
+//
+// It returns ctx.Err() if ctx ends first, while the work goes on in the background; calling it again waits again.
+// Tools and tasks that ignore cancellation hold it up until ctx ends. Do not call it from a task callback: they would wait on each other.
+// Shut the Runner down before the HTTP server that streams its events, with a timeout of its own.
+func (r *Runner) Shutdown(ctx context.Context) error {
+	r.shutdownOnce.Do(func() {
+		// Everything is stopped under one lock, so no run injects a stopped task's result and calls the model once more.
+		r.mu.Lock()
+		r.closed = true
+		for _, run := range r.active {
+			// Cancel rather than Abort: the queued messages stay for Result.Pending instead of being dropped.
+			run.cancel()
+		}
+		for _, t := range r.tasks {
+			if t.snapshot.Status == tool.TaskRunning {
+				t.stopped, t.reason = true, shutdownReason
+				t.cancel()
+			}
+		}
+		r.mu.Unlock()
+		go r.finishShutdown()
+	})
+	select {
+	case <-r.stopped:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// finishShutdown waits for the tasks and deliveries, then for the runs left, and closes stopped.
+// No run can start meanwhile: acquire refuses, wakes are off and only deliveries, which pending covers, occupy a session.
+func (r *Runner) finishShutdown() {
+	r.pending.Wait()
+	for {
+		r.mu.Lock()
+		var run *Run
+		for _, run = range r.active {
+			break
+		}
+		r.mu.Unlock()
+		if run == nil {
+			break
+		}
+		<-run.done
+	}
+	close(r.stopped)
 }

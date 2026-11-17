@@ -284,11 +284,19 @@ A `Runner` holds one Agent and one store and serves any number of sessions: diff
 
 `Result.Status` gives the end status, and `Pending` the queued messages not injected in time. When the model fails, the run is canceled or the turn limit is reached, `Run.Wait` also returns a non-nil `error`, and `Result` is still valid.
 
+`Shutdown(ctx)` is for planned exits (deploys, scaling down, Ctrl+C), within a grace period such as Kubernetes' 30 seconds:
+
+- From the call on, `Start`, `Compact`, new background tasks and `DeliverTaskResult` get `ErrClosed`.
+- Runs in progress are canceled, not left to finish: what the model has written is stored as an aborted message, and queued steer / follow-up messages come back in `Result.Pending`.
+- Background tasks are stopped with `Error` saying the Runner is shutting down, so a restarted session can tell them from tasks a user stopped; their results are written to history without waking the session (`ResultSavedToHistory`).
+- It waits until every result is delivered, `OnTaskFinished` included, and every run has ended; then `Subscribe` calls end, so handlers streaming them return. If `ctx` ends first it returns `ctx.Err()` and the work goes on in the background; tools and tasks that ignore cancellation cause that. Tasks a crash cuts off are left to `DeliverTaskResult` on the next start.
+- Shut the Runner down before the HTTP server streaming its events, each with its own timeout. Do not call it from a task callback.
+
 ### Background tasks
 
 Background tasks spawned by the main run (sub-agents, background commands and so on) are registered in one task table on the Runner, with `tool.Task.Type` telling them apart. The Runner injects the session's `tool.TaskManager` into every main run; sub-task runs do not get one, so sub-agents cannot spawn background tasks.
 
-- Tasks do not follow the run that started them: neither the end of the main run nor `Abort` cancels them, and only the model's `task(stop)` or `StopTask` stops them. `ListTasks(sessionID)` lists the session's tasks whose results have not been delivered. Task snapshots keep only the last 32KB of output. Running tasks are lost when the process exits: a business layer that records them with `OnTaskStarted` / `OnTaskFinished` can, after a restart, hand each one to `DeliverTaskResult` as failed, which sends its result back like a task that just ended, so the session does not wait for it forever.
+- Tasks do not follow the run that started them: neither the end of the main run nor `Abort` cancels them, and only the model's `task(stop)` or `StopTask` stops them. `ListTasks(sessionID)` lists the session's tasks whose results have not been delivered. Task snapshots keep only the last 32KB of output. Running tasks are lost when the process exits: `Shutdown` stops and delivers them on a planned exit; after a crash, a business layer that records them with `OnTaskStarted` / `OnTaskFinished` can, after a restart, hand each one to `DeliverTaskResult` as failed, which sends its result back like a task that just ended, so the session does not wait for it forever.
 - Each sub-agent task runs in a new child session whose ID is the task ID: a Runner sharing the store runs the sub-agent, so storing, replay and compaction work as in the main session and every message can be audited. The task ID leads from parent to child, and the session metadata's `ParentID` from child to parent. A sub-task snapshot's `Details` is `agent.SubAgentDetails` (turns, latest tool, usage).
 - When a task ends (completed, failed, stopped), its result comes back to the session that spawned it as a notice message: a `<task_result>` with the task ID, type, status and description around the result or error; its `Kind` is `task_result`, it is hidden from the user by default, and `Details` is the task's final snapshot.
   - While the session runs: the notice is injected between turns, and one arriving when the run would end makes it run one more turn; notices not injected in time are stored when the run ends.
