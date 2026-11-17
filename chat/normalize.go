@@ -29,7 +29,7 @@ func WithToolCallIDNormalizer(fn func(id string) string) NormalizeOption {
 //   - drops error / aborted assistant messages: they are incomplete turns and replaying them makes the API fail;
 //   - adds an error result for tool calls without one, and drops orphan tool results without a matching call;
 //   - keeps server tool records only for the API that produced them;
-//   - downgrades thinking blocks from other models to text and drops redacted ones; tool call IDs can be normalized,
+//   - drops thinking blocks from other models, signed, redacted or plain alike; tool call IDs can be normalized,
 //     and provider-private signatures on text and tool call blocks, valid only for the original model, are cleared across models;
 //   - when the target endpoint does not support media input (see ModelInfo.SupportsMedia), replaces media in user messages and tool results with a note;
 //     uploaded files the target cannot reach (another FileScope, or about to expire) fall back to the block's data or URL, or to a note;
@@ -73,18 +73,10 @@ func transformAssistantContent(blocks []ContentBlock, sameAPI, sameModel, keepIm
 	for _, block := range blocks {
 		switch block.Type {
 		case ContentTypeThinking:
-			switch {
-			case block.Redacted:
-				if sameModel {
-					out = append(out, block)
-				}
-			case sameModel && block.Signature != "":
+			// Thinking is private to the model that produced it: other models get neither the block nor its text,
+			// which they could take for something they said and reject the request over.
+			if sameModel && (block.Redacted || block.Signature != "" || strings.TrimSpace(block.Text) != "") {
 				out = append(out, block)
-			case strings.TrimSpace(block.Text) == "":
-			case sameModel:
-				out = append(out, block)
-			default:
-				out = append(out, Text(block.Text))
 			}
 		case ContentTypeText:
 			if !sameModel {

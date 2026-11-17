@@ -148,8 +148,8 @@ func TestReplayCrossModelDropsPrivateSignatures(t *testing.T) {
 			t.Fatalf("replay across models should not carry the original model's item id %s: %s", unwanted, got)
 		}
 	}
-	if !strings.Contains(got, "旧模型的推理") || !strings.Contains(got, `"call_id":"call_1"`) {
-		t.Fatalf("replay across models should keep the content (thinking as text) and the calls: %s", got)
+	if strings.Contains(got, "旧模型的推理") || !strings.Contains(got, "我来查") || !strings.Contains(got, `"call_id":"call_1"`) {
+		t.Fatalf("replay across models should drop the thinking and keep the text and the calls: %s", got)
 	}
 }
 

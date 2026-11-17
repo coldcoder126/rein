@@ -81,14 +81,19 @@ func TestNormalizeCrossModelThinking(t *testing.T) {
 	}
 
 	other := chat.NormalizeForModel(msgs("openai", "gpt"), targetModel)[1]
-	if len(other.Content) != 2 || other.Content[0].Type != chat.ContentTypeText || other.Content[0].Text != "推理" {
-		t.Fatalf("across models thinking should become text and redacted thinking be dropped: %+v", other.Content)
+	if len(other.Content) != 1 || other.Content[0].Text != "答" {
+		t.Fatalf("across models thinking should be dropped, not turned into text: %+v", other.Content)
 	}
 
 	otherAPI := targetModel
 	otherAPI.API = "openai-responses"
-	if got := chat.NormalizeForModel(msgs("anthropic", "claude"), otherAPI)[1]; got.Content[0].Type != chat.ContentTypeText {
-		t.Fatalf("the same provider and model over another API should not replay signatures: %+v", got.Content)
+	if got := chat.NormalizeForModel(msgs("anthropic", "claude"), otherAPI)[1]; len(got.Content) != 1 || got.Content[0].Text != "答" {
+		t.Fatalf("the same provider and model over another API should not replay thinking: %+v", got.Content)
+	}
+
+	only := []chat.Message{chat.NewUserTextMessage("q"), assistant("openai", "gpt", thinking), chat.NewUserTextMessage("q2")}
+	if got := chat.NormalizeForModel(only, targetModel); len(got) != 2 {
+		t.Fatalf("an assistant message holding only thinking from another model should be dropped: %+v", got)
 	}
 }
 
