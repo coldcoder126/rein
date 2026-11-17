@@ -72,7 +72,7 @@ type Config struct {
 	// TaskWake decides whether a task's result starts a run when it reaches an idle session, and with which options (WithModel,
 	// WithContext and so on; the options of the run that spawned the task are not carried over). The result is that run's input,
 	// and results of other tasks ending meanwhile are injected into it. It is called for every finished task, on the task's
-	// goroutine, before the session's state is known. Nil never wakes: results reaching an idle session are only written to history.
+	// goroutine, before the session's state is known. The task counts as finished once that run has stored the result. Nil never wakes: results reaching an idle session are only written to history.
 	TaskWake func(ctx context.Context, task tool.Task) (opts []RunOption, wake bool)
 }
 

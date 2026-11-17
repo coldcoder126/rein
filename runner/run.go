@@ -332,7 +332,8 @@ func withoutSnapshot(event Event) Event {
 	return event
 }
 
-func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, options runOptions) error {
+// storeInput creates the session and stores the input of the run: its persistent context, the notice that woke it and the user message.
+func (st *runState) storeInput(ctx context.Context, content []chat.ContentBlock, options runOptions) error {
 	r := st.r
 	// Like save, creating the session ignores the run's cancellation: a run aborted at once still stores its input.
 	if err := r.store.EnsureSession(context.WithoutCancel(ctx), session.Session{ID: st.info.SessionID, ParentID: st.info.ParentSessionID, CreatedAt: time.Now()}); err != nil {
@@ -359,7 +360,16 @@ func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, op
 		}
 		initial = append(initial, user)
 	}
-	if err := st.save(ctx, initial...); err != nil {
+	return st.save(ctx, initial...)
+}
+
+func (st *runState) execute(ctx context.Context, content []chat.ContentBlock, options runOptions) error {
+	r := st.r
+	err := st.storeInput(ctx, content, options)
+	if options.stored != nil {
+		options.stored <- err
+	}
+	if err != nil {
 		return err
 	}
 

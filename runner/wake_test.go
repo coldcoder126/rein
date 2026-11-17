@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -226,5 +228,44 @@ func TestDeliverTaskResultWakes(t *testing.T) {
 	waitIdle(t, r, "s")
 	if last := lastRequestMessage(t, client); !strings.Contains(last.TextContent(), "interrupted") {
 		t.Fatalf("the woken run should see the delivered result: %+v", last)
+	}
+}
+
+// breakableStore fails to append once broken is set, as a store that lost its database would.
+type breakableStore struct {
+	*session.MemoryStore
+	broken atomic.Bool
+}
+
+func (s *breakableStore) AppendMessages(ctx context.Context, sessionID string, messages ...session.Message) error {
+	if s.broken.Load() {
+		return errors.New("store is down")
+	}
+	return s.MemoryStore.AppendMessages(ctx, sessionID, messages...)
+}
+
+func TestTaskWakeReportsAResultItCouldNotStore(t *testing.T) {
+	gates := commandGates{"build": make(chan struct{})}
+	store := &breakableStore{MemoryStore: session.NewMemoryStore()}
+	rec := newTaskRecorder()
+	r, _ := newRunner(t, newClient(chattest.CallTools(backgroundCall("c1", "build")), chattest.Say("构建已经开始")), func(c *Config) {
+		c.Store = store
+		c.Agent.Tools = append(c.Agent.Tools, shell.Tool(shell.Config{Executor: gates}))
+		rec.install(c)
+		c.TaskWake = func(context.Context, tool.Task) ([]RunOption, bool) { return nil, true }
+	})
+	if _, err := runSync(r, bg, "s", Text("构建一下")); err != nil {
+		t.Fatal(err)
+	}
+
+	store.broken.Store(true)
+	close(gates["build"])
+	if f := rec.wait(t); !strings.Contains(f.task.Error, "store is down") {
+		t.Fatalf("a result the woken run could not store should be reported on the task: %+v", f)
+	}
+	waitIdle(t, r, "s")
+	_, err := r.DeliverTaskResult(bg, tool.Task{ID: "task_1", SessionID: "s", Status: tool.TaskFailed, Error: "interrupted"})
+	if err == nil || !strings.Contains(err.Error(), "store is down") {
+		t.Fatalf("delivering a result the woken run could not store should fail: %v", err)
 	}
 }

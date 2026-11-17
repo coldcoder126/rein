@@ -20,6 +20,7 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 - A failed run returns the model's own `*chat.Error`, keeping `Status`, `RetryAfter`, `RequestID` and the underlying error; it used to rebuild one from the kind and message only. A run a middleware ends as failed without a model error no longer panics or returns an empty error.
 - Thinking from another model is dropped on replay instead of being turned into assistant text, which the new model could reject (seen as a refused compaction after switching from Opus to Sonnet).
+- A task result that wakes a session is reported as delivered only once the woken run has stored it; when storing fails, the error reaches `Task.Error` and `DeliverTaskResult` instead of being lost.
 
 ## v0.3.0 (2026-11-16)
 

@@ -312,9 +312,11 @@ func (r *Runner) deliverTaskResult(ctx context.Context, t tool.Task) (TaskResult
 			runCtx, cancel := context.WithCancel(ctx)
 			run := r.occupy(sessionID, cancel, false)
 			r.mu.Unlock()
-			options.notice = &msg
+			// The result counts as delivered once the run has stored it, so a failure to store it is reported like any other.
+			stored := make(chan error, 1)
+			options.notice, options.stored = &msg, stored
 			go r.drive(ctx, runCtx, run, nil, options)
-			return ResultStartedRun, nil
+			return ResultStartedRun, <-stored
 		case h == nil:
 			// While it is occupied new runs wait for it, and other senders wait for it to be released.
 			hold := r.occupy(sessionID, func() {}, true)

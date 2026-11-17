@@ -91,6 +91,8 @@ type runOptions struct {
 	parent *tool.RunInfo
 	// notice is the task result notice that woke this run, stored as its input.
 	notice *session.Message
+	// stored, when set, receives the outcome of storing the run's input, once; it must be buffered.
+	stored chan<- error
 }
 
 func newRunOptions(opts []RunOption) runOptions {
