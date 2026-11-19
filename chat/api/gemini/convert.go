@@ -49,6 +49,9 @@ func (c *Client) buildRequest(req chat.Request) ([]*genai.Content, *genai.Genera
 	}
 	if c.cfg.ImageGeneration {
 		config.ResponseModalities = []string{"TEXT", "IMAGE"}
+		if img := req.Image; img != (chat.ImageOptions{}) {
+			config.ImageConfig = &genai.ImageConfig{AspectRatio: img.AspectRatio, ImageSize: string(img.Size)}
+		}
 	}
 	if len(req.Tools) > 0 {
 		tool, err := convertTools(req.Tools)

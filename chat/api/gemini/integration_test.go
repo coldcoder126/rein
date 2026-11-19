@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
+	_ "image/jpeg"
 	"image/png"
 	"os"
 	"strings"
@@ -293,6 +294,32 @@ func TestIntegrationImageGeneration(t *testing.T) {
 	second := mustDone(t, client, req)
 	if !strings.Contains(strings.ToLower(second.TextContent()), "blue") {
 		t.Fatalf("should see the image generated in the previous turn: %q", second.TextContent())
+	}
+}
+
+// Nano Banana 2.1 with a rejected thinking level and an aspect ratio: LOW falls to MINIMAL, the draft images of its
+// thinking are dropped, and the single image follows the aspect ratio.
+func TestIntegrationNanoBanana(t *testing.T) {
+	client := integrationClient(t, Config{Model: banana21, ImageGeneration: true})
+	msg := mustDone(t, client, chat.Request{
+		Options:  chat.Options{Reasoning: chat.ReasoningLow, Image: chat.ImageOptions{AspectRatio: "16:9", Size: chat.ImageSize1K}},
+		Messages: []chat.Message{chat.NewUserTextMessage("Draw a simple landscape with a red sun.")},
+	})
+	var images [][]byte
+	for _, block := range msg.Content {
+		if block.Type == chat.ContentTypeMedia {
+			images = append(images, block.Data)
+		}
+	}
+	if len(images) != 1 {
+		t.Fatalf("should return one image, got %d", len(images))
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(images[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ratio := float64(cfg.Width) / float64(cfg.Height); ratio < 1.7 || ratio > 1.85 {
+		t.Fatalf("the image should be 16:9, got %dx%d", cfg.Width, cfg.Height)
 	}
 }
 

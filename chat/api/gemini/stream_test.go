@@ -52,6 +52,8 @@ func run(t *testing.T, client *Client, req chat.Request) chat.Event {
 func TestStreamThinkingTextToolCallsAndImage(t *testing.T) {
 	client := serve(t, nil, http.StatusOK,
 		`{"responseId":"r1","modelVersion":"gemini-real","candidates":[{"content":{"role":"model","parts":[{"text":"先想","thought":true}]}}]}`,
+		// A draft image drawn while thinking is dropped.
+		`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"ZHJhZnQ="},"thought":true}]}}]}`,
 		`{"candidates":[{"content":{"role":"model","parts":[{"text":"我来"}]}}]}`,
 		`{"candidates":[{"content":{"role":"model","parts":[{"text":"查"},{"thoughtSignature":"c2lnVA=="}]}}]}`,
 		`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup","args":{"q":"a"}},"thoughtSignature":"c2lnMQ=="},{"functionCall":{"name":"noargs"}}]}}]}`,

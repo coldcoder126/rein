@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/coldcoder126/rein/chat"
 	"google.golang.org/genai"
@@ -23,8 +24,27 @@ var thinkingLevels = map[chat.ReasoningLevel]genai.ThinkingLevel{
 	chat.ReasoningMax:    genai.ThinkingLevelXhigh,
 }
 
+// thinkingOrder lists the thinking levels from lowest to highest.
+var thinkingOrder = []genai.ThinkingLevel{
+	genai.ThinkingLevelMinimal, genai.ThinkingLevelLow, genai.ThinkingLevelMedium, genai.ThinkingLevelHigh, genai.ThinkingLevelXhigh,
+}
+
+// lacks reports whether the model rejects the thinking level.
+func (c Compat) lacks(level genai.ThinkingLevel) bool {
+	switch level {
+	case genai.ThinkingLevelLow:
+		return c.NoLowThinking
+	case genai.ThinkingLevelMedium:
+		return c.NoMediumThinking
+	case genai.ThinkingLevelXhigh:
+		return c.NoXHighThinking
+	}
+	return false
+}
+
 // thinkingConfig maps the provider-neutral effort to Gemini's thinking config, always asking for thought summaries.
-// The levels the model lacks are given by compat: a budget instead of a level, and HIGH instead of XHIGH.
+// The levels the model lacks are given by compat: a budget instead of a level, and a level it rejects falls to the
+// next lower one.
 func thinkingConfig(compat Compat, level chat.ReasoningLevel) (*genai.ThinkingConfig, error) {
 	switch level {
 	case "":
@@ -39,9 +59,9 @@ func thinkingConfig(compat Compat, level chat.ReasoningLevel) (*genai.ThinkingCo
 	if compat.NoThinkingLevel {
 		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr(thinkingBudgets[level])}, nil
 	}
-	thinking := thinkingLevels[level]
-	if thinking == genai.ThinkingLevelXhigh && compat.NoXHighThinking {
-		thinking = genai.ThinkingLevelHigh
+	i := slices.Index(thinkingOrder, thinkingLevels[level])
+	for i > 0 && compat.lacks(thinkingOrder[i]) {
+		i--
 	}
-	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: thinking}, nil
+	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: thinkingOrder[i]}, nil
 }

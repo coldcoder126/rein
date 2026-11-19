@@ -11,10 +11,12 @@ func mustNew(cfg Config) *Client {
 
 // The models the tests talk to, described as a caller would.
 var (
-	neon4   = Model{Name: "gemini-4-neon", MaxInputTokens: 1_048_576, MaxOutputTokens: 1_048_576}
-	flash35 = Model{Name: "gemini-3.5-flash", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini3}
-	pro31   = Model{Name: "gemini-3.1-pro-preview", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini3}
-	flash25 = Model{Name: "gemini-2.5-flash", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini2}
+	neon4    = Model{Name: "gemini-4-neon", MaxInputTokens: 1_048_576, MaxOutputTokens: 1_048_576}
+	flash35  = Model{Name: "gemini-3.5-flash", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini3}
+	pro31    = Model{Name: "gemini-3.1-pro-preview", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini3}
+	flash25  = Model{Name: "gemini-2.5-flash", MaxInputTokens: 1_048_576, MaxOutputTokens: 65_536, Compat: gemini2}
+	banana21 = Model{Name: "gemini-nano-banana-2.1", Compat: Compat{NoLowThinking: true, NoXHighThinking: true}}
+	banana2  = Model{Name: "gemini-3.1-flash-image", Compat: Compat{NoLowThinking: true, NoMediumThinking: true, NoXHighThinking: true}}
 	// gemini3 is what the Gemini 3.x generation lacks.
 	gemini3 = Compat{NoXHighThinking: true}
 	// gemini2 is what the Gemini 2.x generation lacks.

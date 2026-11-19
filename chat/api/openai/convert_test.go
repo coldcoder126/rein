@@ -55,6 +55,26 @@ func TestBuildParamsBasics(t *testing.T) {
 	}
 }
 
+// Image options map to a standard size of the image tool; what it cannot express fails locally.
+func TestBuildParamsImageOptions(t *testing.T) {
+	client := mustNew(Config{Model: luna, ImageGeneration: true})
+	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("画图")}}
+	req.Image = chat.ImageOptions{AspectRatio: "3:2"}
+	if got := marshal(t, mustParams(t, client, req)); !strings.Contains(got, `{"size":"1536x1024","type":"image_generation"}`) {
+		t.Fatalf("the aspect ratio should pick the size: %s", got)
+	}
+	for _, opts := range []chat.ImageOptions{{AspectRatio: "16:9"}, {AspectRatio: "1:1", Size: chat.ImageSize4K}, {Size: chat.ImageSize1K}} {
+		req.Image = opts
+		if _, err := client.buildParams(req); err == nil {
+			t.Fatalf("%+v should be rejected", opts)
+		}
+	}
+	// Without image generation the options are ignored.
+	if _, err := mustNew(Config{Model: luna}).buildParams(req); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBuildParamsReasoningImageGenerationAndDisabledStoreParams(t *testing.T) {
 	req := chat.Request{Messages: []chat.Message{chat.NewUserTextMessage("你好")}}
 

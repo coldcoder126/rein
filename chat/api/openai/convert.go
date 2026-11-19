@@ -97,7 +97,13 @@ func (c *Client) buildParams(req chat.Request) (responses.ResponseNewParams, err
 		params.SetExtraFields(extra)
 	}
 
-	tools, err := convertTools(req.Tools, c.cfg.ImageGeneration, search)
+	var imageTool map[string]any
+	if c.cfg.ImageGeneration {
+		if imageTool, err = imageGenerationTool(req.Image); err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+	}
+	tools, err := convertTools(req.Tools, imageTool, search)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -289,9 +295,27 @@ func assistantItems(msgIndex int, m chat.Message, serverTools bool) ([]responses
 	return items, images
 }
 
+// imageSizes are the standard sizes of the GPT image models by aspect ratio, all in the 1K tier.
+var imageSizes = map[string]string{"1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536"}
+
+// imageGenerationTool returns the hosted image_generation tool shaped by opts. Only the standard sizes are offered,
+// since larger and custom sizes depend on the image model.
+func imageGenerationTool(opts chat.ImageOptions) (map[string]any, error) {
+	tool := map[string]any{"type": "image_generation"}
+	if opts == (chat.ImageOptions{}) {
+		return tool, nil
+	}
+	size, ok := imageSizes[opts.AspectRatio]
+	if !ok || (opts.Size != "" && opts.Size != chat.ImageSize1K) {
+		return nil, fmt.Errorf("openai: image aspect ratio %q at size %q is not supported; use 1:1, 3:2 or 2:3 at 1K", opts.AspectRatio, opts.Size)
+	}
+	tool["size"] = size
+	return tool, nil
+}
+
 // convertTools converts the tools. With tool search on, deferred functions are marked defer_loading and the hosted
 // tool_search is appended after them, so turning it on leaves the order of the other tools unchanged.
-func convertTools(defs []chat.ToolDef, imageGeneration, search bool) ([]responses.ToolUnionParam, error) {
+func convertTools(defs []chat.ToolDef, imageTool map[string]any, search bool) ([]responses.ToolUnionParam, error) {
 	var out []responses.ToolUnionParam
 	for _, def := range defs {
 		var schema map[string]any
@@ -315,8 +339,8 @@ func convertTools(defs []chat.ToolDef, imageGeneration, search bool) ([]response
 	if search {
 		out = append(out, param.Override[responses.ToolUnionParam](map[string]any{"type": "tool_search"}))
 	}
-	if imageGeneration {
-		out = append(out, param.Override[responses.ToolUnionParam](map[string]any{"type": "image_generation"}))
+	if imageTool != nil {
+		out = append(out, param.Override[responses.ToolUnionParam](imageTool))
 	}
 	return out, nil
 }

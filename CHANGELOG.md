@@ -7,6 +7,8 @@ Breaking changes and notable additions per release. Before v1 any release may br
 ### Added
 
 - Gemini: `Reasoning` `xhigh` and `max` ask for the `XHIGH` thinking level of Gemini 4 Hydrogen and Neon; models without it set `Compat.NoXHighThinking` and get `HIGH`.
+- `chat.Options.Image` sets the aspect ratio and size tier (`1K` / `2K` / `4K`) of generated images: Gemini's `imageConfig`, or a standard size of OpenAI's `image_generation` tool (1:1, 3:2 or 2:3 at 1K, others fail with `invalid_request`).
+- Gemini: `Compat.NoLowThinking` and `NoMediumThinking` for the Nano Banana image models; a rejected thinking level falls to the next lower one the model accepts, down to `MINIMAL`.
 - Gemini: a response cut off with `CONTINUATION` is continued automatically (genai v1.79.1) instead of failing as a refusal.
 
 ### Breaking
@@ -15,6 +17,7 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 ### Fixed
 
+- Gemini: draft images that Nano Banana draws while thinking are dropped instead of returned as a second copy of the final image.
 - Gemini: requests to the Gemini API stay on `v1beta`; genai v1.79.1 defaults to `v1`, where older and preview models lack thinking, function calling and JSON mode.
 - Gemini: media given by URL or as an uploaded file in a tool result is embedded in `functionResponse`; as separate parts after it, Gemini 4 rejected a request ending with that tool result ("Requests ending with a model turn are not supported").
 

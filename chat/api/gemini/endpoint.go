@@ -35,9 +35,12 @@ type Model struct {
 type Compat struct {
 	// NoThinkingLevel means only a thinking budget is accepted, not thinkingLevel (Gemini 2.x).
 	NoThinkingLevel bool
-	// NoXHighThinking means the highest thinking level is HIGH, not XHIGH (every model but Gemini 4 Hydrogen and Neon,
-	// which reject XHIGH); ReasoningXHigh and ReasoningMax then ask for HIGH.
-	NoXHighThinking bool
+	// NoLowThinking, NoMediumThinking and NoXHighThinking mean the model rejects that thinking level; a rejected level
+	// falls to the next lower one the model accepts, MINIMAL at the bottom. XHIGH is accepted only by Gemini 4 Hydrogen
+	// and Neon; Nano Banana 2.1 rejects LOW, and Nano Banana 2 and 2 Lite reject LOW and MEDIUM.
+	NoLowThinking    bool
+	NoMediumThinking bool
+	NoXHighThinking  bool
 	// NoMediaInToolResults means media embedded in function results is not accepted (Gemini 2.x);
 	// the media is sent as separate parts of the same message instead.
 	NoMediaInToolResults bool
@@ -47,6 +50,8 @@ type Compat struct {
 func (c Compat) merge(other Compat) Compat {
 	return Compat{
 		NoThinkingLevel:      c.NoThinkingLevel || other.NoThinkingLevel,
+		NoLowThinking:        c.NoLowThinking || other.NoLowThinking,
+		NoMediumThinking:     c.NoMediumThinking || other.NoMediumThinking,
 		NoXHighThinking:      c.NoXHighThinking || other.NoXHighThinking,
 		NoMediaInToolResults: c.NoMediaInToolResults || other.NoMediaInToolResults,
 	}

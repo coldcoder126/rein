@@ -112,6 +112,24 @@ const (
 	CacheRetentionLong CacheRetention = "long"
 )
 
+// ImageSize is the resolution tier of a generated image.
+type ImageSize string
+
+const (
+	ImageSize1K ImageSize = "1K"
+	ImageSize2K ImageSize = "2K"
+	ImageSize4K ImageSize = "4K"
+)
+
+// ImageOptions shape the images a model generates; the zero value uses the model defaults. Providers without image
+// generation, and clients with it turned off, ignore them.
+type ImageOptions struct {
+	// AspectRatio is width:height, such as "1:1", "16:9" or "9:16".
+	AspectRatio string
+	// Size is the resolution tier; see ImageSize.
+	Size ImageSize
+}
+
 // ToolChoiceMode controls whether and how the model calls tools.
 type ToolChoiceMode string
 
@@ -149,7 +167,9 @@ type Options struct {
 	Reasoning ReasoningLevel
 	// CacheRetention defaults to CacheRetentionShort when empty; providers without explicit caching ignore it.
 	CacheRetention CacheRetention
-	Metadata       map[string]string
+	// Image shapes generated images; see ImageOptions.
+	Image    ImageOptions
+	Metadata map[string]string
 }
 
 // Float returns a pointer to v, for setting Options.Temperature.

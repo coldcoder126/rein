@@ -121,6 +121,11 @@ func (s *streamState) part(part *genai.Part) bool {
 		s.b.SignOpenBlock(sig)
 		return s.b.ToolCallEnd(args)
 
+	case part.InlineData != nil && part.Thought:
+		// A draft image the model drew while thinking (Nano Banana): the final image follows as its own part, and
+		// thoughts need no replay.
+		return true
+
 	case part.InlineData != nil:
 		s.last++
 		return s.b.ImageSigned(part.InlineData.MIMEType, part.InlineData.Data, sig)
