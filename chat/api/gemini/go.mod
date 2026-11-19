@@ -3,7 +3,7 @@ module github.com/coldcoder126/rein/chat/api/gemini
 go 1.26.0
 
 require (
-	github.com/coldcoder126/rein v0.3.1
+	github.com/coldcoder126/rein v0.3.2
 	google.golang.org/genai v1.79.1
 )
 
