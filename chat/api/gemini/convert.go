@@ -105,7 +105,8 @@ func convertTools(defs []chat.ToolDef) (*genai.Tool, error) {
 
 // convertMessages converts normalized history into Gemini contents.
 // Consecutive tool results are merged into one user content, as Gemini requires for parallel function calls.
-// multimodalResults means the model accepts images embedded in function results (Gemini 3 and later); otherwise images are separate parts of the same message.
+// multimodalResults means the model accepts media embedded in function results (Gemini 3 and later); otherwise the media
+// follows the function results as separate parts of the same message.
 func convertMessages(messages []chat.Message, multimodalResults bool) ([]*genai.Content, error) {
 	var contents []*genai.Content
 	for i := 0; i < len(messages); {
@@ -122,13 +123,13 @@ func convertMessages(messages []chat.Message, multimodalResults bool) ([]*genai.
 			}
 			i++
 		case chat.RoleTool:
-			var parts, images []*genai.Part
+			var parts, media []*genai.Part
 			for ; i < len(messages) && messages[i].Role == chat.RoleTool; i++ {
 				part, extra := toolResultPart(messages[i], multimodalResults)
 				parts = append(parts, part)
-				images = append(images, extra...)
+				media = append(media, extra...)
 			}
-			contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: append(parts, images...)})
+			contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: append(parts, media...)})
 		default:
 			return nil, fmt.Errorf("gemini: unknown message role %q", m.Role)
 		}
@@ -136,13 +137,18 @@ func convertMessages(messages []chat.Message, multimodalResults bool) ([]*genai.
 	return contents, nil
 }
 
-// mediaPart converts a media block into a part: an uploaded file, inline data or a file URI, the same path for every MIME type.
-func mediaPart(block chat.ContentBlock) *genai.Part {
+// fileURI returns the URI a media block refers to: the uploaded file, else the URL; empty for inline data.
+func fileURI(block chat.ContentBlock) string {
 	if block.File != nil {
-		return &genai.Part{FileData: &genai.FileData{MIMEType: block.MIMEType, FileURI: block.File.ID}}
+		return block.File.ID
 	}
-	if block.URL != "" {
-		return &genai.Part{FileData: &genai.FileData{MIMEType: block.MIMEType, FileURI: block.URL}}
+	return block.URL
+}
+
+// mediaPart converts a media block into a part: a file URI or inline data, the same path for every MIME type.
+func mediaPart(block chat.ContentBlock) *genai.Part {
+	if uri := fileURI(block); uri != "" {
+		return &genai.Part{FileData: &genai.FileData{MIMEType: block.MIMEType, FileURI: uri}}
 	}
 	return &genai.Part{InlineData: &genai.Blob{MIMEType: block.MIMEType, Data: block.Data}}
 }
@@ -208,7 +214,7 @@ func assistantParts(blocks []chat.ContentBlock) []*genai.Part {
 // toolResultPart converts a tool result into a functionResponse, with media embedded or returned as extra parts depending on the model.
 func toolResultPart(m chat.Message, multimodalResults bool) (*genai.Part, []*genai.Part) {
 	var text []string
-	var images []*genai.Part
+	var media []*genai.Part
 	resp := &genai.FunctionResponse{ID: wireID(m.ToolCallID), Name: m.ToolName}
 	for _, block := range m.Content {
 		switch block.Type {
@@ -222,12 +228,12 @@ func toolResultPart(m chat.Message, multimodalResults bool) (*genai.Part, []*gen
 			if multimodalResults {
 				resp.Parts = append(resp.Parts, functionResponseMedia(block))
 			} else {
-				images = append(images, mediaPart(block))
+				media = append(media, mediaPart(block))
 			}
 		}
 	}
 	output := strings.Join(text, "\n")
-	if output == "" && len(resp.Parts)+len(images) > 0 {
+	if output == "" && len(resp.Parts)+len(media) > 0 {
 		output = "(see attached content)"
 	}
 	key := "output"
@@ -235,16 +241,13 @@ func toolResultPart(m chat.Message, multimodalResults bool) (*genai.Part, []*gen
 		key = "error"
 	}
 	resp.Response = map[string]any{key: output}
-	return &genai.Part{FunctionResponse: resp}, images
+	return &genai.Part{FunctionResponse: resp}, media
 }
 
-// functionResponseMedia converts a media block into a functionResponse part, the same sources as mediaPart.
+// functionResponseMedia converts a media block into a functionResponse part, the same way as mediaPart.
 func functionResponseMedia(block chat.ContentBlock) *genai.FunctionResponsePart {
-	if block.File != nil {
-		return &genai.FunctionResponsePart{FileData: &genai.FunctionResponseFileData{MIMEType: block.MIMEType, FileURI: block.File.ID}}
-	}
-	if block.URL != "" {
-		return &genai.FunctionResponsePart{FileData: &genai.FunctionResponseFileData{MIMEType: block.MIMEType, FileURI: block.URL}}
+	if uri := fileURI(block); uri != "" {
+		return &genai.FunctionResponsePart{FileData: &genai.FunctionResponseFileData{MIMEType: block.MIMEType, FileURI: uri}}
 	}
 	return &genai.FunctionResponsePart{InlineData: &genai.FunctionResponseBlob{MIMEType: block.MIMEType, Data: block.Data}}
 }
