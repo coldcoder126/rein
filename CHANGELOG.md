@@ -11,10 +11,11 @@ Breaking changes and notable additions per release. Before v1 any release may br
 
 ### Breaking
 
-- Gemini: models before Gemini 4 Hydrogen and Neon must set `Compat.NoXHighThinking`, or `xhigh` and `max` send a level they do not accept.
+- Gemini: every model but Gemini 4 Hydrogen and Neon (including 4 Argon and Carbon) must set `Compat.NoXHighThinking`; otherwise `xhigh` and `max` fail with 400.
 
 ### Fixed
 
+- Gemini: requests to the Gemini API stay on `v1beta`; genai v1.79.1 defaults to `v1`, where older and preview models lack thinking, function calling and JSON mode.
 - Gemini: media given by URL or as an uploaded file in a tool result is embedded in `functionResponse`; as separate parts after it, Gemini 4 rejected a request ending with that tool result ("Requests ending with a model turn are not supported").
 
 ## v0.3.1 (2026-11-17)

@@ -103,6 +103,9 @@ func (c *Client) newSDKClient(ctx context.Context) (*genai.Client, error) {
 	}
 	if c.cfg.Endpoint.Vertex {
 		cc.Backend = genai.BackendVertexAI
+	} else {
+		// genai defaults to v1, where older and preview models lack thinking, function calling and JSON mode.
+		cc.HTTPOptions.APIVersion = "v1beta"
 	}
 	if c.cfg.Timeout > 0 {
 		cc.HTTPOptions.Timeout = &c.cfg.Timeout

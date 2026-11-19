@@ -35,8 +35,8 @@ type Model struct {
 type Compat struct {
 	// NoThinkingLevel means only a thinking budget is accepted, not thinkingLevel (Gemini 2.x).
 	NoThinkingLevel bool
-	// NoXHighThinking means the highest thinking level is HIGH, not XHIGH (every model before Gemini 4 Hydrogen and
-	// Neon); ReasoningXHigh and ReasoningMax then ask for HIGH.
+	// NoXHighThinking means the highest thinking level is HIGH, not XHIGH (every model but Gemini 4 Hydrogen and Neon,
+	// which reject XHIGH); ReasoningXHigh and ReasoningMax then ask for HIGH.
 	NoXHighThinking bool
 	// NoMediaInToolResults means media embedded in function results is not accepted (Gemini 2.x);
 	// the media is sent as separate parts of the same message instead.
