@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/coldcoder126/rein v0.3.1
-	google.golang.org/genai v1.73.0
+	google.golang.org/genai v1.79.1
 )
 
 require (

@@ -19,13 +19,13 @@ var thinkingLevels = map[chat.ReasoningLevel]genai.ThinkingLevel{
 	chat.ReasoningLow:    genai.ThinkingLevelLow,
 	chat.ReasoningMedium: genai.ThinkingLevelMedium,
 	chat.ReasoningHigh:   genai.ThinkingLevelHigh,
-	chat.ReasoningXHigh:  genai.ThinkingLevelHigh,
-	chat.ReasoningMax:    genai.ThinkingLevelHigh,
+	chat.ReasoningXHigh:  genai.ThinkingLevelXhigh,
+	chat.ReasoningMax:    genai.ThinkingLevelXhigh,
 }
 
 // thinkingConfig maps the provider-neutral effort to Gemini's thinking config, always asking for thought summaries.
-// budgetOnly means the model only accepts a thinking budget, see Compat.NoThinkingLevel.
-func thinkingConfig(budgetOnly bool, level chat.ReasoningLevel) (*genai.ThinkingConfig, error) {
+// The levels the model lacks are given by compat: a budget instead of a level, and HIGH instead of XHIGH.
+func thinkingConfig(compat Compat, level chat.ReasoningLevel) (*genai.ThinkingConfig, error) {
 	switch level {
 	case "":
 		return &genai.ThinkingConfig{IncludeThoughts: true}, nil
@@ -36,8 +36,12 @@ func thinkingConfig(budgetOnly bool, level chat.ReasoningLevel) (*genai.Thinking
 	if _, ok := thinkingLevels[level]; !ok {
 		return nil, fmt.Errorf("gemini: unknown reasoning level %q", level)
 	}
-	if budgetOnly {
+	if compat.NoThinkingLevel {
 		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr(thinkingBudgets[level])}, nil
 	}
-	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: thinkingLevels[level]}, nil
+	thinking := thinkingLevels[level]
+	if thinking == genai.ThinkingLevelXhigh && compat.NoXHighThinking {
+		thinking = genai.ThinkingLevelHigh
+	}
+	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: thinking}, nil
 }

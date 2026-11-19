@@ -2,6 +2,21 @@
 
 Breaking changes and notable additions per release. Before v1 any release may break the API.
 
+## Unreleased
+
+### Added
+
+- Gemini: `Reasoning` `xhigh` and `max` ask for the `XHIGH` thinking level of Gemini 4 Hydrogen and Neon; models without it set `Compat.NoXHighThinking` and get `HIGH`.
+- Gemini: a response cut off with `CONTINUATION` is continued automatically (genai v1.79.1) instead of failing as a refusal.
+
+### Breaking
+
+- Gemini: models before Gemini 4 Hydrogen and Neon must set `Compat.NoXHighThinking`, or `xhigh` and `max` send a level they do not accept.
+
+### Fixed
+
+- Gemini: media given by URL or as an uploaded file in a tool result is embedded in `functionResponse`; as separate parts after it, Gemini 4 rejected a request ending with that tool result ("Requests ending with a model turn are not supported").
+
 ## v0.3.1 (2026-11-17)
 
 ### Added

@@ -29,7 +29,7 @@ func TestRequestBody(t *testing.T) {
 			}},
 			{Role: chat.RoleTool, ToolCallID: "call_1", ToolName: "lookup", Content: []chat.ContentBlock{chat.Text("r1")}},
 			{Role: chat.RoleTool, ToolCallID: generatedIDPrefix + "1", ToolName: "lookup", IsError: true,
-				Content: []chat.ContentBlock{{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")}}},
+				Content: []chat.ContentBlock{{Type: chat.ContentTypeMedia, MIMEType: "image/png", Data: []byte("img")}, chat.MediaURL("https://example.com/shot.png")}},
 			{Role: chat.RoleAssistant, Provider: "openai", Model: "gpt", Content: []chat.ContentBlock{call("call_x", "")}},
 			{Role: chat.RoleTool, ToolCallID: "call_x", ToolName: "lookup", Content: []chat.ContentBlock{chat.Text("rx")}},
 		},
@@ -45,7 +45,7 @@ func TestRequestBody(t *testing.T) {
 		`"functionCall":{"args":{"q":"a"},"id":"call_1","name":"lookup"},"thoughtSignature":"c2lnMQ=="`,
 		`{"functionCall":{"args":{"q":"a"},"name":"lookup"}}`,
 		`"functionResponse":{"id":"call_1","name":"lookup","response":{"output":"r1"}}`,
-		`"response":{"error":"(see attached content)"}`,
+		`"parts":[{"inlineData":{"data":"aW1n","mimeType":"image/png"}},{"fileData":{"fileUri":"https://example.com/shot.png","mimeType":"image/png"}}],"response":{"error":"(see attached content)"}`,
 		`"thoughtSignature":"c2tpcF90aG91Z2h0X3NpZ25hdHVyZV92YWxpZGF0b3I="`,
 	} {
 		if !strings.Contains(body, want) {

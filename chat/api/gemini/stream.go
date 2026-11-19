@@ -156,8 +156,10 @@ func (s *streamState) finish() {
 			return
 		}
 		s.b.Fail(&chat.Error{Kind: chat.KindNetwork, Message: "gemini: stream ended before a finishReason"})
-	case genai.FinishReasonMalformedFunctionCall, genai.FinishReasonUnexpectedToolCall, genai.FinishReasonOther:
+	case genai.FinishReasonMalformedFunctionCall, genai.FinishReasonUnexpectedToolCall, genai.FinishReasonOther,
+		genai.FinishReasonContinuation:
 		// The model produced invalid output this time (3.1 pro occasionally returns MALFORMED_FUNCTION_CALL in testing); a retry usually recovers.
+		// CONTINUATION only reaches here when the SDK could not continue the response itself.
 		s.b.Fail(&chat.Error{Kind: chat.KindServer, Message: s.failureText("response ended abnormally")})
 	default:
 		// SAFETY, RECITATION, BLOCKLIST, PROHIBITED_CONTENT, SPII and the various image safety reasons.

@@ -10,7 +10,7 @@ import (
 // A client lacks what either its endpoint or its model lacks, and requests follow that.
 func TestCompatOfEndpointAndModelAdd(t *testing.T) {
 	client := mustNew(Config{
-		Endpoint: Endpoint{Compat: Compat{NoThinkingLevel: true}},
+		Endpoint: Endpoint{Compat: Compat{NoThinkingLevel: true, NoXHighThinking: true}},
 		Model:    Model{Name: "m", Compat: Compat{NoMediaInToolResults: true}},
 	})
 	if want := gemini2; client.compat != want {

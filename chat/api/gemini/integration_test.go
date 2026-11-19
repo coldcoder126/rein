@@ -218,6 +218,43 @@ func TestIntegrationToolResultImage(t *testing.T) {
 	}
 }
 
+// A tool result with a URL image as the last message: Gemini 4 rejects the request when the image follows the
+// functionResponse as a separate part, so it must be embedded in it.
+func TestIntegrationToolResultURLImage(t *testing.T) {
+	for _, model := range []Model{neon4, flash35} {
+		t.Run(model.Name, func(t *testing.T) {
+			client := integrationClient(t, Config{Model: model})
+			call := chat.ToolCall{ID: "call_logo_1", Name: "fetch_logo", Arguments: json.RawMessage(`{}`)}
+			msg := mustDone(t, client, chat.Request{
+				Tools: []chat.ToolDef{{Name: "fetch_logo", Description: "Fetch the logo image", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)}},
+				Messages: []chat.Message{
+					chat.NewUserTextMessage("Fetch the logo, then tell me in one sentence what it shows."),
+					{Role: chat.RoleAssistant, Provider: "other", Model: "other", StopReason: chat.StopReasonToolUse,
+						Content: []chat.ContentBlock{{Type: chat.ContentTypeToolCall, ToolCall: &call}}},
+					{Role: chat.RoleTool, ToolCallID: call.ID, ToolName: call.Name,
+						Content: []chat.ContentBlock{chat.Text("Here is the logo."), chat.MediaURL(chattest.SampleImageURL)}},
+				},
+			})
+			t.Logf("answer: %s", msg.TextContent())
+			if !strings.Contains(strings.ToLower(msg.TextContent()), "go") {
+				t.Fatalf("should describe the Go logo: %q", msg.TextContent())
+			}
+		})
+	}
+}
+
+// Gemini 4 Neon accepts the XHIGH thinking level.
+func TestIntegrationXHighThinking(t *testing.T) {
+	client := integrationClient(t, Config{Model: neon4})
+	msg := mustDone(t, client, chat.Request{
+		Options:  chat.Options{Reasoning: chat.ReasoningXHigh},
+		Messages: []chat.Message{chat.NewUserTextMessage("What is 17 * 23? Answer with the number only.")},
+	})
+	if !strings.Contains(msg.TextContent(), "391") {
+		t.Fatalf("unexpected reply: %q", msg.TextContent())
+	}
+}
+
 func TestIntegrationStructuredOutput(t *testing.T) {
 	for _, model := range []Model{flash35, flash25} {
 		t.Run(model.Name, func(t *testing.T) {

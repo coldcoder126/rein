@@ -104,6 +104,7 @@ func TestStreamTerminalStates(t *testing.T) {
 		{"safety block", []string{text, `{"candidates":[{"finishReason":"SAFETY"}]}`}, chat.StopReasonError, chat.KindRefusal},
 		{"prompt blocked", []string{`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}`}, chat.StopReasonError, chat.KindRefusal},
 		{"malformed function call", []string{`{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL"}]}`}, chat.StopReasonError, chat.KindServer},
+		{"continuation without token", []string{text, `{"candidates":[{"finishReason":"CONTINUATION"}]}`}, chat.StopReasonError, chat.KindServer},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,6 +113,34 @@ func TestStreamTerminalStates(t *testing.T) {
 				t.Fatalf("wrong terminal state: %+v err=%v", final, final.Err)
 			}
 		})
+	}
+}
+
+// A response cut off with CONTINUATION is continued by the SDK with its token and read as one message.
+func TestStreamContinuation(t *testing.T) {
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(bodies) == 1 {
+			fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"前半"}]},"finishReason":"CONTINUATION","continuationToken":"dG9r"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3,"totalTokenCount":13}}`+"\n\n")
+			return
+		}
+		fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"后半"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4,"totalTokenCount":14}}`+"\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := mustNew(Config{Model: flash35, APIKey: "test", Endpoint: Endpoint{BaseURL: server.URL}})
+	final := run(t, client, chat.Request{})
+	if final.Type != chat.EventDone || final.Reason != chat.StopReasonStop || final.Message.TextContent() != "前半后半" {
+		t.Fatalf("the continued response should finish as one message: %+v err=%v", final, final.Err)
+	}
+	if len(bodies) != 2 || !strings.Contains(bodies[1], `"continuationToken":"dG9r"`) {
+		t.Fatalf("the second request should carry the continuation token: %q", bodies)
+	}
+	// Every request is billed, so usage adds up across them.
+	if u := final.Message.Usage; u.Input != 20 || u.Output != 7 {
+		t.Fatalf("usage should add up across requests: %+v", u)
 	}
 }
 
